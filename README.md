@@ -11,8 +11,7 @@ Repository: <https://github.com/BuddhadebKoner/FileSpace>
 - Browse folders and files from a responsive web interface.
 - Share an entire drive, such as `D:\`, or only one folder.
 - Preview images, videos, audio, PDFs, and text files in the browser.
-- Play MKV files through server-side FFmpeg transcoding to browser-compatible
-  MP4 with AAC audio.
+- Preview supported media files in the browser.
 - Stream large files with HTTP range support for seeking.
 - Search recursively within the selected root.
 - Protect access with email/password login, IP allowlisting, throttling,
@@ -24,7 +23,6 @@ Repository: <https://github.com/BuddhadebKoner/FileSpace>
 
 - Windows 10 or later.
 - Python 3.10 or later.
-- FFmpeg available as `ffmpeg.exe` on `PATH` for MKV browser playback.
 - A trusted local network or a private VPN such as Tailscale.
 
 The server uses Python's standard library. Pillow is optional and only
@@ -41,11 +39,32 @@ Copy-Item .env.example .env
 notepad .env
 ```
 
-Set a real email and a long, unique password in `.env`. Then start the server:
+Set the folder or drive to share in `.env`. The repository can be cloned
+anywhere; it does not need to be inside the shared folder:
+
+```ini
+FILESPACE_ROOT=D:\
+FILESPACE_CREATE_SHORTCUT=false
+```
+
+For another installation, change this to a local path such as
+`D:\Videos`. A command-line `--root` overrides `FILESPACE_ROOT` for one run.
+
+Set `FILESPACE_CREATE_SHORTCUT=true` to create or update one `File Server.lnk`
+shortcut on the current user's Desktop. The shortcut launches the same Python
+script with the configured `.env` file and working directory. Set it back to
+`false` to stop updating the shortcut; an existing shortcut is not deleted.
+
+Set a real email and a long, unique password in `.env`, then start the server:
 
 ```powershell
 python .\fileserver.py
 ```
+
+On the first run, if `.env` does not exist, FileSpace creates it and asks you
+to configure it before continuing. After saving the values above, run the
+command again. The shortcut is then created automatically when
+`FILESPACE_CREATE_SHORTCUT=true`.
 
 Open the network URL printed by the server, for example:
 
@@ -54,6 +73,32 @@ http://192.168.1.20:6789/
 ```
 
 The default shared root is `D:\`.
+
+### Recommended installation flow
+
+```powershell
+git clone https://github.com/BuddhadebKoner/FileSpace.git
+cd .\FileSpace
+Copy-Item .env.example .env
+notepad .env
+python .\fileserver.py
+```
+
+Example `.env` values:
+
+```ini
+FILESPACE_ROOT=D:\Shared
+FILESPACE_CREATE_SHORTCUT=true
+FILESPACE_EMAIL=owner@example.com
+FILESPACE_PASSWORD=replace-with-a-long-password
+FILESPACE_ALLOWED_IPS=192.168.1.0/24
+FILESPACE_PUBLIC=false
+```
+
+`FILESPACE_ROOT` must point to an existing readable folder or drive. A smaller
+folder such as `D:\Shared` is usually more efficient and safer than sharing
+the entire drive. The shortcut is created on the Windows Desktop selected by
+Windows, including a OneDrive-managed Desktop.
 
 ## Access modes
 
@@ -113,6 +158,14 @@ and **Server health** panel show the active access mode.
 
 Share the whole `D:\` drive:
 
+In `.env`:
+
+```ini
+FILESPACE_ROOT=D:\
+```
+
+Or for one run:
+
 ```powershell
 python .\fileserver.py --root D:\
 ```
@@ -133,7 +186,7 @@ Available options:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--root` | `D:\` | Folder or drive to share |
+| `--root` | `FILESPACE_ROOT` from `.env`, or `D:\` | Folder or drive to share for one run |
 | `--host` | `0.0.0.0` | Address to listen on |
 | `--port` | `6789` | HTTP port |
 | `--env` | `.env` beside the script | Settings file |
@@ -141,41 +194,14 @@ Available options:
 
 Run `python .\fileserver.py --help` for the complete command reference.
 
-## Browser video playback
-
-FileSpace uses the normal system `ffmpeg.exe`; the Python packages
-`ffmpeg-python` and `imageio-ffmpeg` are not required.
-
-Install FFmpeg with Chocolatey from an elevated PowerShell:
-
-```powershell
-choco install ffmpeg -y
-```
-
-Verify it in the same PowerShell environment used to start FileSpace:
-
-```powershell
-Get-Command ffmpeg
-ffmpeg -version
-```
-
-Restart FileSpace after installing FFmpeg. Server health should show:
-
-```text
-Browser video: FFmpeg is available for MKV playback
-```
-
-When an MKV is opened for the first time, FileSpace creates a cached,
-browser-compatible MP4 in the system temporary directory. The source video is
-not changed. Subsequent playback reuses the cache when the source file has not
-changed.
-
 ## Configuration
 
 `.env` is ignored by Git and must never be committed. Start from
 [.env.example](./.env.example):
 
 ```ini
+FILESPACE_ROOT=D:\
+FILESPACE_CREATE_SHORTCUT=false
 FILESPACE_EMAIL=me@example.com
 FILESPACE_PASSWORD=use-a-long-unique-password
 FILESPACE_ALLOWED_IPS=192.168.1.0/24
@@ -184,6 +210,8 @@ FILESPACE_PUBLIC=false
 
 | Setting | Description |
 | --- | --- |
+| `FILESPACE_ROOT` | Folder or drive to share; defaults to `D:\` |
+| `FILESPACE_CREATE_SHORTCUT` | `true` creates or updates `File Server.lnk` on the Desktop; `false` disables shortcut creation |
 | `FILESPACE_EMAIL` | Login email |
 | `FILESPACE_PASSWORD` | Login password; use at least 8 characters |
 | `FILESPACE_ALLOWED_IPS` | Allowed IPv4 addresses and CIDR ranges |
@@ -209,24 +237,15 @@ with additional authentication and access controls.
 ## Logs and troubleshooting
 
 Activity is written to `logs.txt`. The startup output and health panel report
-the shared-folder state, disk space, login configuration, access mode, FFmpeg,
-and thumbnail support.
+the shared-folder state, disk space, login configuration, access mode, and
+thumbnail support.
 
 Check the environment:
 
 ```powershell
 python --version
-Get-Command ffmpeg
 Test-Path .\.env
 ```
-
-If MKV playback fails:
-
-1. Run `ffmpeg -version`.
-2. Confirm the command works in the same PowerShell used to start the server.
-3. Stop FileSpace with `Ctrl+C`.
-4. Start it again with `python .\fileserver.py`.
-5. Check **Server health** and retry the video.
 
 If a device cannot connect, check the selected access mode, the IP/CIDR value,
 Windows Firewall, and whether both devices are on the same network or VPN.

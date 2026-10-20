@@ -8,6 +8,8 @@ Optional:
 
 Settings live in a ".env" file next to this script (created on first run):
 
+    FILESPACE_ROOT=D:\\
+    FILESPACE_CREATE_SHORTCUT=false
     FILESPACE_EMAIL=you@example.com
     FILESPACE_PASSWORD=your-long-password
     FILESPACE_ALLOWED_IPS=203.0.113.7, 100.101.102.103
@@ -38,6 +40,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -353,6 +356,11 @@ catch{err.textContent='Could not reach the server.'}btn.disabled=false});
 
 ENV_TEMPLATE = """# FileSpace settings. This file is re-read automatically when you save it,
 # so you do not need to restart the server after editing.
+
+# Folder or drive to share. A command-line --root overrides this value.
+FILESPACE_ROOT=D:\
+# Create or update "File Server.lnk" on the current user's Desktop.
+FILESPACE_CREATE_SHORTCUT=false
 
 # Login credentials
 FILESPACE_EMAIL=you@example.com
@@ -749,9 +757,54 @@ def ensure_env_file(path: Path) -> None:
         "then run this script again.\n")
 
 
+def create_desktop_shortcut(script_path: Path, env_path: Path) -> None:
+    """Create or update the FileSpace launcher shortcut for this user."""
+    powershell = r"""
+$ErrorActionPreference = 'Stop'
+$desktop = [Environment]::GetFolderPath('Desktop')
+$shortcutPath = Join-Path $desktop 'File Server.lnk'
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $env:FILESPACE_SHORTCUT_TARGET
+$shortcut.Arguments = $env:FILESPACE_SHORTCUT_ARGUMENTS
+$shortcut.WorkingDirectory = $env:FILESPACE_SHORTCUT_WORKING_DIRECTORY
+$shortcut.Description = 'Start the FileSpace server'
+$shortcut.Save()
+Write-Output $shortcutPath
+"""
+    try:
+        environment = os.environ.copy()
+        cmd = Path(os.environ.get("COMSPEC", r"C:\Windows\System32\cmd.exe"))
+        python = str(sys.executable)
+        arguments = f'/k ""{python}" "{script_path}" --env "{env_path}""'
+        environment.update({
+            "FILESPACE_SHORTCUT_TARGET": str(cmd),
+            "FILESPACE_SHORTCUT_ARGUMENTS": arguments,
+            "FILESPACE_SHORTCUT_WORKING_DIRECTORY": str(script_path.parent),
+        })
+        result = subprocess.run(
+            [
+                "powershell.exe", "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-Command", powershell,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+            env=environment,
+        )
+        shortcut = Path(result.stdout.strip().splitlines()[-1])
+        print(f" Shortcut    : {shortcut}")
+    except (OSError, subprocess.CalledProcessError) as e:
+        detail = e.stderr.strip() if isinstance(e, subprocess.CalledProcessError) and e.stderr else str(e)
+        print(f" WARNING     : could not create desktop shortcut ({detail})", flush=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Start the FileSpace browser.")
-    parser.add_argument("--root", default="D:\\", help="Root folder to share (default: D:\\)")
+    parser.add_argument(
+        "--root", default=None,
+        help="Root folder to share (default: FILESPACE_ROOT from .env, or D:\\)",
+    )
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (0.0.0.0 allows other devices; default)")
     parser.add_argument("--port", type=int, default=6789, help="Port (default: 6789)")
     parser.add_argument("--env", default=str(Path(__file__).resolve().with_name(".env")),
@@ -760,12 +813,20 @@ def main():
                         help="Activity log file (default: logs.txt next to this script)")
     args = parser.parse_args()
 
-    root = Path(args.root).resolve()
-    if not root.is_dir():
-        raise SystemExit(f"Root directory does not exist: {root}")
-
     env_path = Path(args.env).resolve()
     ensure_env_file(env_path)
+    try:
+        env_data = parse_env(env_path.read_text(encoding="utf-8-sig"))
+    except OSError as e:
+        raise SystemExit(f"Cannot read settings file {env_path}: {e}")
+
+    root_value = args.root if args.root is not None else env_data.get("FILESPACE_ROOT", "D:\\")
+    root = Path(root_value).expanduser().resolve()
+    if not root.is_dir():
+        raise SystemExit(f"Root directory does not exist: {root}")
+    if env_data.get("FILESPACE_CREATE_SHORTCUT", "").strip().lower() in TRUE_VALUES:
+        create_desktop_shortcut(Path(__file__).resolve(), env_path)
+
     log = ActivityLog(Path(args.log).resolve())
     store = ConfigStore(env_path, on_reload=lambda c: log.write("-", "CONFIG_RELOAD", describe(c)))
     sessions = SessionStore(on_end=lambda ip, why: log.write(ip, "SESSION_END", why))
