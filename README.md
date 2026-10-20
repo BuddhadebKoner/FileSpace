@@ -31,61 +31,6 @@ The server uses Python's standard library for the core file browser. The
 `qrcode` package is recommended for terminal QR login. Pillow is optional and
 only improves image thumbnail generation.
 
-## Quick start
-
-Open PowerShell and clone the repository:
-
-```powershell
-git clone https://github.com/BuddhadebKoner/FileSpace.git
-cd .\FileSpace
-Copy-Item .env.example .env
-notepad .env
-```
-
-Set the folder or drive to share in `.env`. The repository can be cloned
-anywhere; it does not need to be inside the shared folder:
-
-```ini
-FILESPACE_ROOT=D:\
-FILESPACE_CREATE_SHORTCUT=false
-```
-
-For another installation, change this to a local path such as
-`D:\Videos`. A command-line `--root` overrides `FILESPACE_ROOT` for one run.
-
-Set `FILESPACE_CREATE_SHORTCUT=true` to create or update one `File Server.lnk`
-shortcut on the current user's Desktop. The shortcut launches the same Python
-script with the configured `.env` file and working directory. Set it back to
-`false` to stop updating the shortcut; an existing shortcut is not deleted.
-
-Install the terminal QR renderer if you want the QR code shown directly in
-PowerShell:
-
-```powershell
-pip install qrcode
-```
-
-Set the authentication mode in `.env`, then start the server:
-
-```powershell
-python .\fileserver.py
-```
-
-On the first run, if `.env` does not exist, FileSpace creates it and asks you
-to configure it before continuing. After saving the values above, run the
-command again. The shortcut is then created automatically when
-`FILESPACE_CREATE_SHORTCUT=true`.
-
-When `FILESPACE_AUTH_MODE=qr`, FileSpace prints a short-lived, single-use QR
-login code at startup. Scan it with the browser or device you want to sign in.
-Open the network URL printed by the server, for example:
-
-```text
-http://192.168.1.20:6789/
-```
-
-The default shared root is `D:\`.
-
 ### Recommended installation flow
 
 ```powershell
@@ -101,13 +46,11 @@ Example `.env` values:
 ```ini
 FILESPACE_ROOT=D:\Shared
 FILESPACE_CREATE_SHORTCUT=true
-FILESPACE_EMAIL=owner@example.com
-FILESPACE_PASSWORD=replace-with-a-long-password
 FILESPACE_AUTH_MODE=qr
 FILESPACE_ALLOWED_IPS=192.168.1.0/24
-FILESPACE_PUBLIC=false
-CANDIDATE_FILE_UPLOAD_ENABLED=false
-FILESPACE_UPLOAD_MAX_MB=10
+FILESPACE_PUBLIC=true
+CANDIDATE_FILE_UPLOAD_ENABLED=true
+FILESPACE_UPLOAD_MAX_MB=100
 FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
 ```
 
