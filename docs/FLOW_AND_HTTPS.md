@@ -57,7 +57,8 @@ Related docs:
 
 ## 2. Setup Question Flow
 
-The normal configuration flow is terminal-driven:
+The normal configuration flow is terminal-driven. Every yes/no prompt uses
+`[Y/n]`, so pressing Enter chooses `Y`.
 
 1. `FILESPACE_ROOT`
    User enters the folder or drive to share.
@@ -81,8 +82,8 @@ The normal configuration flow is terminal-driven:
 7. `CANDIDATE_FILE_UPLOAD_ENABLED`
    Controls whether authenticated users can create folders and upload files.
 
-8. `Use default FILESPACE_UPLOAD_MAX_MB=1000?`
-   `Y` keeps 1000 MB. `N` asks for a custom upload limit.
+8. `FILESPACE_UPLOAD_MAX_MB`
+   Pressing Enter keeps the shown upload limit, which defaults to 1000 MB.
 
 ## 3. Request Flow
 

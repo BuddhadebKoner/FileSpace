@@ -5,10 +5,8 @@ import sys
 from pathlib import Path
 
 from .constants import (
-    FALSE_VALUES,
     PLACEHOLDER_EMAIL,
     PLACEHOLDER_PASSWORD,
-    TRUE_VALUES,
     UPLOAD_DEFAULT_MAX_MB,
     UPLOAD_MAX_CAP_MB,
 )
@@ -32,18 +30,7 @@ def can_prompt() -> bool:
     return sys.stdin.isatty() and sys.stdout.isatty()
 
 
-def _bool_from_env(value: str | None, default: bool = False) -> bool:
-    if value is None:
-        return default
-    normalized = value.strip().lower()
-    if normalized in TRUE_VALUES:
-        return True
-    if normalized in FALSE_VALUES:
-        return False
-    return default
-
-
-def _yes_no(question: str, default: bool) -> bool:
+def _yes_no(question: str, default: bool = True) -> bool:
     suffix = " [Y/n]: " if default else " [y/N]: "
     while True:
         raw = input(question + suffix).strip().lower()
@@ -89,12 +76,16 @@ def _path(question: str, default: str) -> str:
 
 
 def _upload_limit(default: str | None) -> str:
-    current = str(default or UPLOAD_DEFAULT_MAX_MB)
-    use_default = _yes_no(f"Use default FILESPACE_UPLOAD_MAX_MB={UPLOAD_DEFAULT_MAX_MB}?", True)
-    if use_default:
-        return str(UPLOAD_DEFAULT_MAX_MB)
+    current = str(UPLOAD_DEFAULT_MAX_MB)
+    if default:
+        try:
+            saved = int(default)
+        except ValueError:
+            saved = UPLOAD_DEFAULT_MAX_MB
+        if 1 <= saved <= UPLOAD_MAX_CAP_MB:
+            current = str(saved)
     while True:
-        raw = _text(f"Custom FILESPACE_UPLOAD_MAX_MB (1-{UPLOAD_MAX_CAP_MB})", current, required=True)
+        raw = _text(f"FILESPACE_UPLOAD_MAX_MB (1-{UPLOAD_MAX_CAP_MB})", current, required=True)
         try:
             value = int(raw)
         except ValueError:
@@ -140,17 +131,15 @@ def run_setup_wizard(env_path: Path, root_override: str | None = None) -> dict[s
     data = parse_env(text)
     print("")
     print("FileSpace setup - answers will be saved to .env before the server starts.")
-    print("Press Enter to keep the shown default.")
+    print("Press Enter to choose Y on yes/no questions and keep shown text defaults.")
     print("")
 
     updates: dict[str, str] = {}
     root_default = root_override or data.get("FILESPACE_ROOT", "D:\\")
     updates["FILESPACE_ROOT"] = _path("FILESPACE_ROOT", root_default)
-    updates["FILESPACE_CREATE_SHORTCUT"] = str(
-        _yes_no("FILESPACE_CREATE_SHORTCUT", _bool_from_env(data.get("FILESPACE_CREATE_SHORTCUT"), False))
-    ).lower()
+    updates["FILESPACE_CREATE_SHORTCUT"] = str(_yes_no("FILESPACE_CREATE_SHORTCUT")).lower()
 
-    use_qr = _yes_no("Use QR login? This sets FILESPACE_AUTH_MODE=qr", data.get("FILESPACE_AUTH_MODE", "qr") != "password")
+    use_qr = _yes_no("Use QR login? This sets FILESPACE_AUTH_MODE=qr")
     if use_qr:
         updates["FILESPACE_AUTH_MODE"] = "qr"
     else:
@@ -162,7 +151,7 @@ def run_setup_wizard(env_path: Path, root_override: str | None = None) -> dict[s
         )
         updates["FILESPACE_PASSWORD"] = _password(data.get("FILESPACE_PASSWORD", ""))
 
-    is_public = _yes_no("FILESPACE_PUBLIC", _bool_from_env(data.get("FILESPACE_PUBLIC"), False))
+    is_public = _yes_no("FILESPACE_PUBLIC")
     updates["FILESPACE_PUBLIC"] = str(is_public).lower()
     if is_public:
         updates["FILESPACE_ALLOWED_IPS"] = ""
@@ -173,10 +162,7 @@ def run_setup_wizard(env_path: Path, root_override: str | None = None) -> dict[s
             required=False,
         )
 
-    uploads_enabled = _yes_no(
-        "CANDIDATE_FILE_UPLOAD_ENABLED",
-        _bool_from_env(data.get("CANDIDATE_FILE_UPLOAD_ENABLED"), False),
-    )
+    uploads_enabled = _yes_no("CANDIDATE_FILE_UPLOAD_ENABLED")
     updates["CANDIDATE_FILE_UPLOAD_ENABLED"] = str(uploads_enabled).lower()
     updates["FILESPACE_UPLOAD_MAX_MB"] = _upload_limit(data.get("FILESPACE_UPLOAD_MAX_MB"))
 

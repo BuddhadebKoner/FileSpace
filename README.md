@@ -8,7 +8,7 @@ FileSpace lets you open a folder or drive from a browser and browse your files
 from another device. It starts from one command, asks a few setup questions in
 the terminal, then shows a login QR code or login page.
 
-It is read-only by default. You can choose to enable uploads during setup.
+You can keep it read-only or enable authenticated uploads during setup.
 
 ## Quick Start
 
@@ -30,7 +30,7 @@ code or open the printed browser link.
 - Preview images, videos, audio, PDFs, and text files.
 - Search inside the shared folder.
 - Log in with a one-time QR code or email/password.
-- Keep files read-only unless you enable uploads.
+- Keep files read-only when upload mode is off.
 - Optionally create folders and upload allowed files.
 
 ## Requirements
@@ -54,15 +54,16 @@ When you run FileSpace, answer the questions like this:
 | `FILESPACE_ROOT` | `D:\Shared` | Folder or drive to share |
 | `FILESPACE_CREATE_SHORTCUT` | `Y` | Create a Desktop shortcut with the FileSpace logo |
 | `Use QR login?` | `Y` | Use one-time QR login |
-| `FILESPACE_PUBLIC` | `N` | Restrict who can open the login page |
-| `FILESPACE_ALLOWED_IPS` | `192.168.1.0/24` | Allowed network or devices |
-| `CANDIDATE_FILE_UPLOAD_ENABLED` | `N` | Keep FileSpace read-only |
-| `Use default FILESPACE_UPLOAD_MAX_MB=1000?` | `Y` | Use 1000 MB upload limit |
+| `FILESPACE_PUBLIC` | `Y` | Allow any reachable device to open the login page |
+| `FILESPACE_ALLOWED_IPS` | `192.168.1.0/24` | Allowed network or devices when public mode is off |
+| `CANDIDATE_FILE_UPLOAD_ENABLED` | `Y` | Allow folder creation and uploads |
+| `FILESPACE_UPLOAD_MAX_MB` | `1000` | Use 1000 MB upload limit |
 
 If you answer `N` to `Use QR login?`, FileSpace asks for an email and password
 instead.
 
-Press Enter to keep the shown default on later runs.
+Press Enter on yes/no questions chooses `Y`. Press Enter on text and number
+questions keeps the shown default.
 
 ## Which Access Mode Should I Choose?
 
