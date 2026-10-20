@@ -1,5 +1,9 @@
 # FileSpace
 
+Developer-facing notes for FileSpace. For normal user setup, start with
+[README.md](README.md). For the full runtime flow and HTTP-to-HTTPS upgrade
+notes, see [docs/FLOW_AND_HTTPS.md](docs/FLOW_AND_HTTPS.md).
+
 FileSpace is a personal web file browser for Windows. It is read-only by
 default, with an optional authenticated upload mode. Clone the repository,
 configure one `.env` file, and run one Python command to browse a folder or an
