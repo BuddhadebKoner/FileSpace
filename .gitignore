@@ -1,0 +1,10 @@
+.env
+logs.txt
+logs.old.txt
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.vscode/
+filespace-playback-cache/
+*.tmp.mp4
