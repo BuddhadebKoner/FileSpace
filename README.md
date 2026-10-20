@@ -14,8 +14,8 @@ Repository: <https://github.com/BuddhadebKoner/FileSpace>
 - Preview supported media files in the browser.
 - Stream large files with HTTP range support for seeking.
 - Search recursively within the selected root.
-- Protect access with email/password login, IP allowlisting, throttling,
-  session expiry, security headers, and activity logs.
+- Protect access with QR-code login, optional email/password fallback, IP
+  allowlisting, throttling, session expiry, security headers, and activity logs.
 - Keep the shared filesystem read-only: no upload, edit, rename, or delete
   operations are provided.
 
@@ -25,8 +25,9 @@ Repository: <https://github.com/BuddhadebKoner/FileSpace>
 - Python 3.10 or later.
 - A trusted local network or a private VPN such as Tailscale.
 
-The server uses Python's standard library. Pillow is optional and only
-improves image thumbnail generation.
+The server uses Python's standard library for the core file browser. The
+`qrcode` package is recommended for terminal QR login. Pillow is optional and
+only improves image thumbnail generation.
 
 ## Quick start
 
@@ -55,7 +56,14 @@ shortcut on the current user's Desktop. The shortcut launches the same Python
 script with the configured `.env` file and working directory. Set it back to
 `false` to stop updating the shortcut; an existing shortcut is not deleted.
 
-Set a real email and a long, unique password in `.env`, then start the server:
+Install the terminal QR renderer if you want the QR code shown directly in
+PowerShell:
+
+```powershell
+pip install qrcode
+```
+
+Set the authentication mode in `.env`, then start the server:
 
 ```powershell
 python .\fileserver.py
@@ -66,6 +74,8 @@ to configure it before continuing. After saving the values above, run the
 command again. The shortcut is then created automatically when
 `FILESPACE_CREATE_SHORTCUT=true`.
 
+When `FILESPACE_AUTH_MODE=qr`, FileSpace prints a short-lived, single-use QR
+login code at startup. Scan it with the browser or device you want to sign in.
 Open the network URL printed by the server, for example:
 
 ```text
@@ -91,6 +101,7 @@ FILESPACE_ROOT=D:\Shared
 FILESPACE_CREATE_SHORTCUT=true
 FILESPACE_EMAIL=owner@example.com
 FILESPACE_PASSWORD=replace-with-a-long-password
+FILESPACE_AUTH_MODE=qr
 FILESPACE_ALLOWED_IPS=192.168.1.0/24
 FILESPACE_PUBLIC=false
 ```
@@ -204,6 +215,7 @@ FILESPACE_ROOT=D:\
 FILESPACE_CREATE_SHORTCUT=false
 FILESPACE_EMAIL=me@example.com
 FILESPACE_PASSWORD=use-a-long-unique-password
+FILESPACE_AUTH_MODE=qr
 FILESPACE_ALLOWED_IPS=192.168.1.0/24
 FILESPACE_PUBLIC=false
 ```
@@ -212,10 +224,34 @@ FILESPACE_PUBLIC=false
 | --- | --- |
 | `FILESPACE_ROOT` | Folder or drive to share; defaults to `D:\` |
 | `FILESPACE_CREATE_SHORTCUT` | `true` creates or updates `File Server.lnk` on the Desktop; `false` disables shortcut creation |
-| `FILESPACE_EMAIL` | Login email |
-| `FILESPACE_PASSWORD` | Login password; use at least 8 characters |
+| `FILESPACE_EMAIL` | Login email for `password` or `both` auth modes |
+| `FILESPACE_PASSWORD` | Login password for `password` or `both` auth modes; use at least 8 characters |
+| `FILESPACE_AUTH_MODE` | `qr`, `password`, or `both`; defaults to QR login |
 | `FILESPACE_ALLOWED_IPS` | Allowed IPv4 addresses and CIDR ranges |
 | `FILESPACE_PUBLIC` | `false` enforces the allowlist; `true` allows the login page from any reachable device |
+
+## QR login
+
+QR login is short-lived and single-use. On startup, FileSpace creates an
+in-memory token, prints a terminal QR code when `qrcode` is installed, and
+expires the token after 5 minutes. The QR code does not contain your password
+or a permanent credential. If `qrcode` is not installed, FileSpace prints a
+one-time login link instead. If the code expires, restart FileSpace to print a
+fresh one.
+
+The sign-in page also includes an **Open camera** button when QR login is
+enabled. Camera scanning depends on the browser's built-in QR scanner support
+and camera permissions. Some browsers block camera access on plain local-network
+HTTP addresses; use localhost, HTTPS, or scan with the phone/device camera if
+that happens.
+
+Use `FILESPACE_AUTH_MODE=both` if you want QR login with the old
+email/password form as a fallback. Use `FILESPACE_AUTH_MODE=password` to roll
+back to the previous behavior.
+
+Only one FileSpace server can use the same port at a time. If you start it
+again while another terminal is already serving that port, the new run exits
+with a clear message instead of taking over the old terminal.
 
 ## Security and privacy
 
@@ -223,7 +259,9 @@ Sharing `D:\` exposes every readable file under that drive to an authenticated
 user. Use a smaller `--root` when whole-drive access is not necessary.
 
 - Prefer `FILESPACE_PUBLIC=false`.
-- Use a strong, unique password.
+- Use a strong, unique password if password login is enabled.
+- QR login is authentication, not encryption; plain HTTP still exposes traffic
+  to devices that can observe the network.
 - Prefer a private LAN or VPN.
 - Do not expose the built-in HTTP server directly to the public internet.
 - Plain HTTP does not encrypt passwords or files in transit.

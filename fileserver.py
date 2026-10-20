@@ -12,6 +12,7 @@ Settings live in a ".env" file next to this script (created on first run):
     FILESPACE_CREATE_SHORTCUT=false
     FILESPACE_EMAIL=you@example.com
     FILESPACE_PASSWORD=your-long-password
+    FILESPACE_AUTH_MODE=qr
     FILESPACE_ALLOWED_IPS=203.0.113.7, 100.101.102.103
     FILESPACE_PUBLIC=false
 
@@ -57,6 +58,13 @@ try:  # optional: faster, smaller thumbnails (pip install pillow)
     HAVE_PIL = True
 except Exception:  # pragma: no cover
     HAVE_PIL = False
+
+try:  # optional: terminal QR rendering (pip install qrcode)
+    import qrcode
+    HAVE_QRCODE = True
+except Exception:  # pragma: no cover
+    qrcode = None
+    HAVE_QRCODE = False
 
 PAGE = r"""<!doctype html>
 <html lang="en">
@@ -330,29 +338,98 @@ LOGIN_PAGE = r"""<!doctype html>
 <style>
 :root{--bg:#0a1020;--line:#26334b;--text:#edf2ff;--muted:#9ba9c2;--accent:#9ba9ff}
 *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(ellipse at 10% 0%,#202b55 0,transparent 35%),radial-gradient(ellipse at 95% 10%,#10334b 0,transparent 28%),var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
-.card{width:min(400px,100%);border:1px solid var(--line);border-radius:22px;background:rgba(17,26,45,.94);padding:30px;box-shadow:0 22px 65px #0004}
+.card{width:min(420px,100%);border:1px solid var(--line);border-radius:22px;background:rgba(17,26,45,.94);padding:30px;box-shadow:0 22px 65px #0004}
 .brand{display:flex;align-items:center;gap:11px;font-size:19px;font-weight:800;letter-spacing:-.04em;margin-bottom:22px}.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#a5b4fc,#67e8f9);color:#0a1020;font-size:22px}
-h1{font-size:26px;letter-spacing:-.04em;margin:0 0 6px}p{color:var(--muted);margin:0 0 22px}label{display:block;font-size:11px;color:var(--muted);margin:14px 0 6px;font-weight:600}
+h1{font-size:26px;letter-spacing:-.04em;margin:0 0 6px}p{color:var(--muted);margin:0 0 18px}.qr{border:1px solid #2b3852;background:#0c1527;border-radius:14px;padding:14px;margin:14px 0 18px;color:var(--muted);font-size:13px}
+label{display:block;font-size:11px;color:var(--muted);margin:14px 0 6px;font-weight:600}
 input{width:100%;border:1px solid #2b3852;background:#0c1527;border-radius:12px;padding:12px;color:var(--text);outline:none;font:inherit}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #9ba9ff20}
 button{width:100%;margin-top:22px;border:0;border-radius:12px;padding:12px;font:inherit;font-weight:700;color:#0a1020;background:linear-gradient(135deg,#a5b4fc,#67e8f9);cursor:pointer}button:disabled{opacity:.6;cursor:wait}
+button.secondary{margin-top:10px;color:var(--text);background:#111b31;border:1px solid #2b3852}.scan{display:grid;gap:10px;margin-top:14px}.scan video{width:100%;aspect-ratio:4/3;border:1px solid #2b3852;border-radius:14px;background:#050914;object-fit:cover}
 .err{min-height:20px;margin-top:14px;color:#fca5a5;font-size:12px}.note{color:#fde68a;font-size:12px}
 </style></head>
-<body><form class="card" id="f" autocomplete="on">
+<body><main class="card">
 <div class="brand"><span class="logo">▱</span>FileSpace</div>
-<h1>Sign in</h1><p>Enter your credentials to browse files.</p>
-<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username" required autofocus>
-<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required>
-<div class="err" id="err" role="alert"></div><div class="note" id="note"></div>
+<h1>Sign in</h1><p id="lead"></p>
+<div class="qr" id="qr" hidden>Scan the one-time QR code printed in the FileSpace terminal. If it expired, restart FileSpace to print a fresh code.</div>
+<div class="scan" id="scan" hidden>
+<button id="scanBtn" type="button">Open camera</button>
+<video id="scanVideo" muted playsinline hidden></video>
+<button class="secondary" id="scanStop" type="button" hidden>Close camera</button>
+</div>
+<form id="f" autocomplete="on" hidden>
+<label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username">
+<label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password">
 <button id="btn" type="submit">Sign in</button>
 </form>
+<div class="err" id="err" role="alert"></div><div class="note" id="note"></div>
+</main>
 <script>
-const f=document.getElementById('f'),err=document.getElementById('err'),btn=document.getElementById('btn');
-try{if(sessionStorage.getItem('fs_out')){sessionStorage.removeItem('fs_out');document.getElementById('note').textContent='You were signed out. This happens automatically after 5 minutes of inactivity.'}}catch{}
-f.addEventListener('submit',async e=>{e.preventDefault();err.textContent='';btn.disabled=true;
+const AUTH=/*__AUTH__*/;
+const f=document.getElementById('f'),err=document.getElementById('err'),btn=document.getElementById('btn'),lead=document.getElementById('lead');
+const scan=document.getElementById('scan'),scanBtn=document.getElementById('scanBtn'),scanStop=document.getElementById('scanStop'),scanVideo=document.getElementById('scanVideo');
+document.getElementById('qr').hidden=!AUTH.qr;
+scan.hidden=!AUTH.qr;
+f.hidden=!AUTH.password;
+lead.textContent=AUTH.qr&&AUTH.password?'Scan the terminal QR code or use your password fallback.':AUTH.qr?'Use the one-time QR code shown in the terminal.':'Enter your credentials to browse files.';
+if(AUTH.password){f.email.required=true;f.password.required=true;f.email.autofocus=true}
+try{if(sessionStorage.getItem('fs_out')){sessionStorage.removeItem('fs_out');document.getElementById('note').textContent='You were signed out. This happens automatically after '+AUTH.idle_minutes+' minutes of inactivity.'}}catch{}
+let scanStream=null,scanTimer=null,scanDetector=null,scanBusy=false;
+function tokenFromQrValue(value){try{const u=new URL(value,location.origin);if(u.pathname!=='/auth/qr')return'';const raw=u.hash.replace(/^#/,'');const q=raw[0]==='?'?raw.slice(1):raw;const p=new URLSearchParams(q);return p.get('t')||p.get('token')||(!q.includes('=')?q:'')}catch{return''}}
+function stopScanner(){if(scanTimer){clearTimeout(scanTimer);scanTimer=null}if(scanStream){scanStream.getTracks().forEach(t=>t.stop());scanStream=null}scanVideo.srcObject=null;scanVideo.hidden=true;scanStop.hidden=true;scanBtn.disabled=false;scanBtn.textContent='Open camera';scanBusy=false}
+async function consumeQr(token){if(!token){err.textContent='That QR code is not a FileSpace login code.';return}stopScanner();err.textContent='';scanBtn.disabled=true;scanBtn.textContent='Signing in...';
+ try{const r=await fetch('/auth/qr/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+ const d=await r.json().catch(()=>({}));if(r.ok){location.reload();return}err.textContent=d.error||('QR sign-in failed ('+r.status+')')}
+ catch{err.textContent='Could not reach the server.'}scanBtn.disabled=false;scanBtn.textContent='Open camera'}
+async function scanLoop(){if(!scanStream||scanBusy)return;try{const found=await scanDetector.detect(scanVideo);const hit=found.find(x=>x.rawValue);if(hit){scanBusy=true;const token=tokenFromQrValue(hit.rawValue);if(token)return consumeQr(token);err.textContent='That QR code is not a FileSpace login code.';scanBusy=false}}catch{}scanTimer=setTimeout(scanLoop,350)}
+async function startScanner(){err.textContent='';if(!('BarcodeDetector' in window)){err.textContent='This browser cannot scan QR codes here. Use your phone camera or the one-time link printed in the terminal.';return}
+ if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){err.textContent='Camera access needs HTTPS, localhost, or a browser that allows camera on this address.';return}
+ try{scanDetector=new BarcodeDetector({formats:['qr_code']});scanStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'},audio:false});scanVideo.srcObject=scanStream;scanVideo.hidden=false;scanStop.hidden=false;scanBtn.disabled=true;await scanVideo.play();scanLoop()}
+ catch(e){stopScanner();err.textContent=(e&&e.name==='NotAllowedError')?'Camera permission was denied.':'Could not open the camera. On local-network HTTP, your browser may block camera access.'}}
+if(AUTH.qr){scanBtn.addEventListener('click',startScanner);scanStop.addEventListener('click',stopScanner);addEventListener('pagehide',stopScanner)}
+if(AUTH.password)f.addEventListener('submit',async e=>{e.preventDefault();err.textContent='';btn.disabled=true;
 try{const r=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email:f.email.value,password:f.password.value})});
 const d=await r.json().catch(()=>({}));if(r.ok){location.reload();return}err.textContent=d.error||('Sign-in failed ('+r.status+')')}
 catch{err.textContent='Could not reach the server.'}btn.disabled=false});
 </script></body></html>"""
+
+QR_AUTH_PAGE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>FileSpace · QR login</title>
+<style>
+:root{--bg:#0a1020;--line:#26334b;--text:#edf2ff;--muted:#9ba9c2;--accent:#9ba9ff}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(ellipse at 10% 0%,#202b55 0,transparent 35%),radial-gradient(ellipse at 95% 10%,#10334b 0,transparent 28%),var(--bg);color:var(--text);font:14px/1.5 Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+.card{width:min(420px,100%);border:1px solid var(--line);border-radius:22px;background:rgba(17,26,45,.94);padding:30px;box-shadow:0 22px 65px #0004}
+.brand{display:flex;align-items:center;gap:11px;font-size:19px;font-weight:800;letter-spacing:-.04em;margin-bottom:22px}.logo{width:42px;height:42px;border-radius:14px;display:grid;place-items:center;background:linear-gradient(135deg,#a5b4fc,#67e8f9);color:#0a1020;font-size:22px}
+h1{font-size:26px;letter-spacing:-.04em;margin:0 0 6px}p{color:var(--muted);margin:0}.err{min-height:20px;margin-top:14px;color:#fca5a5;font-size:12px}
+a{display:inline-block;margin-top:18px;color:var(--accent);font-weight:700;text-decoration:none}
+</style></head>
+<body><main class="card">
+<div class="brand"><span class="logo">▱</span>FileSpace</div>
+<h1>QR login</h1><p id="msg">Checking the one-time code...</p><div class="err" id="err" role="alert"></div><a href="/">Back to sign in</a>
+</main>
+<script>
+const msg=document.getElementById('msg'),err=document.getElementById('err');
+function tokenFromHash(){const raw=location.hash.replace(/^#/,'');if(!raw)return'';const q=raw[0]==='?'?raw.slice(1):raw;const p=new URLSearchParams(q);return p.get('t')||p.get('token')||(!q.includes('=')?q:'')}
+const token=tokenFromHash();history.replaceState(null,'',location.pathname);
+async function run(){if(!token){msg.textContent='No QR token was found in this link.';return}
+try{const r=await fetch('/auth/qr/consume',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+const d=await r.json().catch(()=>({}));if(r.ok){msg.textContent='Signed in. Opening FileSpace...';location.replace('/');return}
+msg.textContent='QR login failed.';err.textContent=d.error||('Request failed ('+r.status+')')}
+catch{msg.textContent='QR login failed.';err.textContent='Could not reach the server.'}}
+run();
+</script></body></html>"""
+
+
+def render_login_page(cfg: "Settings") -> str:
+    auth = json.dumps({
+        "qr": cfg.qr_login_enabled,
+        "password": cfg.password_login_enabled,
+        "idle_minutes": max(1, SESSION_IDLE_SECONDS // 60),
+    })
+    return LOGIN_PAGE.replace("/*__AUTH__*/", auth)
 
 ENV_TEMPLATE = """# FileSpace settings. This file is re-read automatically when you save it,
 # so you do not need to restart the server after editing.
@@ -365,6 +442,9 @@ FILESPACE_CREATE_SHORTCUT=false
 # Login credentials
 FILESPACE_EMAIL=you@example.com
 FILESPACE_PASSWORD=change-this-long-password
+
+# Authentication mode: qr, password, or both.
+FILESPACE_AUTH_MODE=qr
 
 # Devices allowed to connect: comma-separated IPs or ranges (CIDR).
 # Example: FILESPACE_ALLOWED_IPS=203.0.113.7, 100.101.102.103, 192.168.1.0/24
@@ -387,6 +467,7 @@ SKIP_DIRS = {
 COOKIE_NAME = "fs_session"
 SESSION_IDLE_SECONDS = 5 * 60        # signed out after 5 minutes of inactivity
 SESSION_MAX_SECONDS = 24 * 3600      # and always after 24 hours
+QR_TOKEN_SECONDS = 5 * 60            # startup QR is short-lived and single-use
 MAX_LOGIN_FAILURES = 5               # per IP address
 LOGIN_LOCK_SECONDS = 15 * 60
 SEARCH_MAX_SCANNED = 15000
@@ -394,6 +475,7 @@ SEARCH_MAX_RESULTS = 500
 CHUNK = 256 * 1024
 LOG_MAX_BYTES = 5 * 1024 * 1024   # logs.txt is rotated to logs.old.txt above this size
 TRUE_VALUES = {"1", "true", "yes", "on"}
+AUTH_MODES = {"qr", "password", "both"}
 
 CSP = ("default-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; "
        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -531,6 +613,7 @@ class ActivityLog:
 class Settings:
     email: str
     password: str
+    auth_mode: str
     public: bool
     networks: tuple
     bad_entries: tuple
@@ -539,6 +622,18 @@ class Settings:
     @property
     def credentials_ready(self) -> bool:
         return bool(self.email) and bool(self.password) and self.password != PLACEHOLDER_PASSWORD
+
+    @property
+    def password_login_enabled(self) -> bool:
+        return self.auth_mode in {"password", "both"}
+
+    @property
+    def qr_login_enabled(self) -> bool:
+        return self.auth_mode in {"qr", "both"}
+
+    @property
+    def auth_ready(self) -> bool:
+        return self.qr_login_enabled or (self.password_login_enabled and self.credentials_ready)
 
 
 def parse_env(text: str) -> dict:
@@ -558,6 +653,9 @@ def parse_env(text: str) -> dict:
 def build_settings(data: dict) -> Settings:
     email = data.get("FILESPACE_EMAIL", "").strip()
     password = data.get("FILESPACE_PASSWORD", "")
+    auth_mode = data.get("FILESPACE_AUTH_MODE", "qr").strip().lower()
+    if auth_mode not in AUTH_MODES:
+        auth_mode = "qr"
     public = data.get("FILESPACE_PUBLIC", "false").strip().lower() in TRUE_VALUES
     networks, bad = [], []
     for raw in re.split(r"[,\s;]+", data.get("FILESPACE_ALLOWED_IPS", "")):
@@ -567,8 +665,8 @@ def build_settings(data: dict) -> Settings:
             networks.append(ipaddress.ip_network(raw, strict=False))
         except ValueError:
             bad.append(raw)
-    fingerprint = hashlib.sha256(f"{email.lower()}\0{password}".encode("utf-8")).hexdigest()
-    return Settings(email, password, public, tuple(networks), tuple(bad), fingerprint)
+    fingerprint = hashlib.sha256(f"{auth_mode}\0{email.lower()}\0{password}".encode("utf-8")).hexdigest()
+    return Settings(email, password, auth_mode, public, tuple(networks), tuple(bad), fingerprint)
 
 
 def describe(s: Settings) -> str:
@@ -578,7 +676,7 @@ def describe(s: Settings) -> str:
         mode = f"RESTRICTED ({len(s.networks)} allowed IP entr{'y' if len(s.networks) == 1 else 'ies'}: " \
                f"{', '.join(str(n) for n in s.networks) or 'none'})"
     extra = f" | ignored invalid IPs: {', '.join(s.bad_entries)}" if s.bad_entries else ""
-    return f"{mode}{extra}"
+    return f"{mode} | auth={s.auth_mode}{extra}"
 
 
 class ConfigStore:
@@ -686,6 +784,54 @@ class SessionStore:
             return len(self._d)
 
 
+class QrLoginStore:
+    def __init__(self):
+        self._d: dict[str, list] = {}   # sha256(token) -> [fingerprint, expires_at]
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _digest(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def _cleanup_locked(self, now: float) -> None:
+        for key, (_, expires_at) in list(self._d.items()):
+            if expires_at <= now:
+                del self._d[key]
+
+    def issue(self, fingerprint: str) -> tuple[str, float]:
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        expires_at = now + QR_TOKEN_SECONDS
+        with self._lock:
+            self._cleanup_locked(now)
+            self._d[self._digest(token)] = [fingerprint, expires_at]
+        return token, expires_at
+
+    def consume(self, token: str, fingerprint: str) -> tuple[bool, str]:
+        if not token or len(token) > 256:
+            return False, "QR code is invalid or has expired."
+        digest = self._digest(token)
+        now = time.time()
+        with self._lock:
+            self._cleanup_locked(now)
+            item = self._d.pop(digest, None)
+        if not item:
+            return False, "QR code is invalid or has expired."
+        if item[0] != fingerprint:
+            return False, "Server authentication settings changed. Restart FileSpace for a fresh QR code."
+        return True, ""
+
+    def clear(self) -> None:
+        with self._lock:
+            self._d.clear()
+
+    def count(self) -> int:
+        now = time.time()
+        with self._lock:
+            self._cleanup_locked(now)
+            return len(self._d)
+
+
 class Throttle:
     def __init__(self):
         self._d: dict[str, list] = {}   # ip -> [failures, locked_until, last_failure]
@@ -747,13 +893,37 @@ def local_ips() -> list[str]:
     return found
 
 
+def browser_host(host: str, port: int) -> str:
+    if host in ("0.0.0.0", ""):
+        ips = [ip for ip in local_ips() if not ip.startswith("127.")]
+        host = ips[0] if ips else "127.0.0.1"
+    elif host == "::":
+        host = "127.0.0.1"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"http://{host}:{port}"
+
+
+def print_terminal_qr(url: str) -> bool:
+    if not HAVE_QRCODE or qrcode is None:
+        return False
+    try:
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(url)
+        qr.make(fit=True)
+        qr.print_ascii(out=sys.stdout, tty=False)
+        return True
+    except Exception:
+        return False
+
+
 def ensure_env_file(path: Path) -> None:
     if path.exists():
         return
     path.write_text(ENV_TEMPLATE, encoding="utf-8")
     raise SystemExit(
         f"\nCreated a settings file at: {path}\n"
-        "Open it, set FILESPACE_EMAIL, FILESPACE_PASSWORD and FILESPACE_ALLOWED_IPS,\n"
+        "Open it, set FILESPACE_AUTH_MODE, FILESPACE_ALLOWED_IPS, and any password fallback,\n"
         "then run this script again.\n")
 
 
@@ -828,9 +998,16 @@ def main():
         create_desktop_shortcut(Path(__file__).resolve(), env_path)
 
     log = ActivityLog(Path(args.log).resolve())
-    store = ConfigStore(env_path, on_reload=lambda c: log.write("-", "CONFIG_RELOAD", describe(c)))
+    qr_logins = QrLoginStore()
+
+    def config_reloaded(c: Settings) -> None:
+        qr_logins.clear()
+        log.write("-", "CONFIG_RELOAD", f"{describe(c)}; pending QR login tokens cleared")
+
+    store = ConfigStore(env_path, on_reload=config_reloaded)
     sessions = SessionStore(on_end=lambda ip, why: log.write(ip, "SESSION_END", why))
     throttle = Throttle()
+    qr_throttle = Throttle()
 
     # --- never share the FileSpace app itself (script, .env, logs) -----------
     app_file = Path(__file__).resolve()
@@ -927,12 +1104,27 @@ def main():
             add("Settings file", "ok", ".env loaded")
         else:
             add("Settings file", "fail", ".env is missing")
-        if not cfg.credentials_ready:
-            add("Login", "fail", "Set a real email and password in .env")
-        elif len(cfg.password) < 8:
-            add("Login", "warn", "Password is short (use 8+ characters)")
-        else:
-            add("Login", "ok", f"Configured · {sessions.count()} active session(s)")
+        login_status, details = "ok", []
+        if cfg.qr_login_enabled:
+            if HAVE_QRCODE:
+                details.append(f"QR enabled · {qr_logins.count()} pending code(s)")
+            else:
+                login_status = "warn"
+                details.append("QR enabled; install qrcode for terminal QR rendering")
+        if cfg.password_login_enabled:
+            if not cfg.credentials_ready:
+                login_status = "fail"
+                details.append("password login enabled but credentials are not configured")
+            elif len(cfg.password) < 8:
+                if login_status != "fail":
+                    login_status = "warn"
+                details.append("password fallback configured but short")
+            else:
+                details.append("password fallback configured")
+        if not details:
+            login_status, details = "fail", ["no authentication method enabled"]
+        details.append(f"{sessions.count()} active session(s)")
+        add("Login", login_status, "; ".join(details))
         if cfg.public:
             add("Access", "warn", "Public: any device can reach the login page")
         else:
@@ -1039,6 +1231,12 @@ def main():
             morsel = jar.get(COOKIE_NAME)
             return morsel.value if morsel else None
 
+        def session_cookie(self, token: str) -> str:
+            return f"{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_SECONDS}"
+
+        def expired_session_cookie(self) -> str:
+            return f"{COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"
+
         def authed(self, cfg: Settings, touch: bool = True) -> bool:
             token = self.session_token()
             return bool(token) and sessions.valid(token, cfg.fingerprint, touch)
@@ -1059,7 +1257,11 @@ def main():
                 if route == "/healthz":
                     return self.api_healthz()
                 if route == "/":
-                    return self.send_html(200, page_html if self.authed(cfg) else LOGIN_PAGE)
+                    return self.send_html(200, page_html if self.authed(cfg) else render_login_page(cfg))
+                if route == "/auth/qr":
+                    if not cfg.qr_login_enabled:
+                        return self.send_json(404, {"error": "Not found"})
+                    return self.send_html(200, QR_AUTH_PAGE)
                 if route.startswith("/api/"):
                     if not self.authed(cfg, touch=(route != "/api/health")):
                         if route != "/api/health":
@@ -1111,6 +1313,8 @@ def main():
                 return self.deny()
             route = urlparse(self.path).path
             try:
+                if route == "/auth/qr/consume":
+                    return self.api_qr_consume(cfg)
                 if route == "/login":
                     return self.api_login(cfg)
                 if route == "/logout":
@@ -1119,15 +1323,53 @@ def main():
                         sessions.destroy(token)
                     reason = parse_qs(urlparse(self.path).query).get("reason", [""])[0]
                     log.write(self.client_ip(), "LOGOUT", "signed out after inactivity" if reason == "idle" else "")
-                    expire = f"{COOKIE_NAME}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0"
+                    expire = self.expired_session_cookie()
                     return self.send_json(200, {"ok": True}, extra=[("Set-Cookie", expire)])
                 self.send_json(404, {"error": "Not found"})
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
         # ---- login ----------------------------------------------------
+        def api_qr_consume(self, cfg: Settings):
+            ip = self.client_ip()
+            if not cfg.qr_login_enabled:
+                log.write(ip, "QR_LOGIN_OFF", "QR login is disabled")
+                return self.send_json(404, {"error": "QR login is disabled."})
+            wait = qr_throttle.locked_for(ip)
+            if wait:
+                log.write(ip, "QR_LOGIN_LOCKED", f"attempt while locked out ({wait}s left)")
+                return self.send_json(429, {"error": f"Too many attempts. Try again in {max(1, wait // 60)} minute(s)."},
+                                      extra=[("Retry-After", str(wait))])
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+                if length <= 0 or length > 2048:
+                    raise ValueError
+                body = json.loads(self.rfile.read(length))
+                token = str(body.get("token", "")).strip()
+            except (ValueError, AttributeError, UnicodeDecodeError):
+                return self.send_json(400, {"error": "Bad request."})
+            ok, error = qr_logins.consume(token, cfg.fingerprint)
+            if ok:
+                qr_throttle.ok(ip)
+                token = sessions.create(cfg.fingerprint, ip)
+                qr_logins.clear()
+                print(f"[qr-login] success from {ip}", flush=True)
+                log.write(ip, "QR_LOGIN_OK", "")
+                return self.send_json(200, {"ok": True}, extra=[("Set-Cookie", self.session_cookie(token))])
+            time.sleep(0.4)
+            locked = qr_throttle.fail(ip)
+            print(f"[qr-login] FAILED from {ip}" + (" (now locked out)" if locked else ""), flush=True)
+            log.write(ip, "QR_LOGIN_FAIL", "invalid, expired, or already-used token" + (" -> IP locked out 15 min" if locked else ""))
+            if locked:
+                return self.send_json(429, {"error": f"Too many attempts. Try again in {locked // 60} minutes."},
+                                      extra=[("Retry-After", str(locked))])
+            return self.send_json(401, {"error": error})
+
         def api_login(self, cfg: Settings):
             ip = self.client_ip()
+            if not cfg.password_login_enabled:
+                log.write(ip, "LOGIN_OFF", "password login is disabled")
+                return self.send_json(404, {"error": "Password login is disabled."})
             wait = throttle.locked_for(ip)
             if wait:
                 log.write(ip, "LOGIN_LOCKED", f"attempt while locked out ({wait}s left)")
@@ -1149,10 +1391,9 @@ def main():
             if ok_email and ok_pass:
                 throttle.ok(ip)
                 token = sessions.create(cfg.fingerprint, ip)
-                cookie = f"{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_MAX_SECONDS}"
                 print(f"[login] success from {ip}", flush=True)
                 log.write(ip, "LOGIN_OK", f"email={email.strip()}")
-                return self.send_json(200, {"ok": True}, extra=[("Set-Cookie", cookie)])
+                return self.send_json(200, {"ok": True}, extra=[("Set-Cookie", self.session_cookie(token))])
             time.sleep(0.6)
             locked = throttle.fail(ip)
             print(f"[login] FAILED from {ip}" + (" (now locked out)" if locked else ""), flush=True)
@@ -1328,10 +1569,26 @@ def main():
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
                 pass
 
-    httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+    try:
+        httpd = ThreadingHTTPServer((args.host, args.port), Handler)
+    except OSError as e:
+        port_in_use = getattr(e, "winerror", None) == 10048 or getattr(e, "errno", None) in (48, 98, 10048)
+        if port_in_use:
+            raise SystemExit(
+                f"\nFileSpace is already running or port {args.port} is busy.\n"
+                f"Only one FileSpace server can use port {args.port} at a time.\n"
+                f"Open http://127.0.0.1:{args.port}/ in your browser, stop the previous terminal, "
+                "or start this one with a different --port.\n"
+            )
+        raise
     httpd.daemon_threads = True
 
     cfg = store.get()
+    startup_qr_url, startup_qr_expires = None, None
+    if cfg.qr_login_enabled:
+        qr_token, startup_qr_expires = qr_logins.issue(cfg.fingerprint)
+        startup_qr_url = f"{browser_host(args.host, args.port)}/auth/qr#t={qr_token}"
+
     log.write("-", "SERVER_START", f"port {args.port}, root {root}, {describe(cfg)}")
     line = "=" * 56
     print(line)
@@ -1345,10 +1602,20 @@ def main():
     if args.host in ("0.0.0.0", ""):
         for ip in local_ips():
             print(f" Network URL : http://{ip}:{args.port}/")
+    if startup_qr_url and startup_qr_expires:
+        expires = datetime.fromtimestamp(startup_qr_expires).strftime("%H:%M:%S")
+        print(f" QR login    : one-time code expires at {expires}")
+        if print_terminal_qr(startup_qr_url):
+            print(" QR status   : scan the code above with the browser/device you want to sign in")
+        else:
+            print(" QR package  : install qrcode to render the QR directly in this terminal")
+            print(f" Login link  : {startup_qr_url}")
     print(" Read-only   : file changes/deletes/uploads are disabled")
     print(f" Access      : {describe(cfg)}")
-    if not cfg.credentials_ready:
-        print(" WARNING     : set a real FILESPACE_EMAIL / FILESPACE_PASSWORD in .env; logins are disabled until then")
+    if cfg.qr_login_enabled and not HAVE_QRCODE:
+        print(" WARNING     : QR auth is enabled, but terminal QR rendering needs: pip install qrcode")
+    if cfg.password_login_enabled and not cfg.credentials_ready:
+        print(" WARNING     : password login is enabled but FILESPACE_EMAIL / FILESPACE_PASSWORD are not configured")
     if cfg.public:
         print(" WARNING     : PUBLIC mode - anyone who finds this address can attempt to log in")
     print(" Health check:")
