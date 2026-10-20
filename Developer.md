@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="FileSpace logo" width="128">
+</p>
+
 # FileSpace
 
 Developer-facing notes for FileSpace. For normal user setup, start with
@@ -73,7 +77,8 @@ FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,mp4,m4v,mov,we
 `FILESPACE_ROOT` must point to an existing readable folder or drive. A smaller
 folder such as `D:\Shared` is usually more efficient and safer than sharing
 the entire drive. The shortcut is created on the Windows Desktop selected by
-Windows, including a OneDrive-managed Desktop.
+Windows, including a OneDrive-managed Desktop, and uses the FileSpace logo when
+`logo.ico` or `logo.png` is present beside `fileserver.py`.
 
 ## Access modes
 
@@ -187,7 +192,7 @@ FILESPACE_PUBLIC=false
 | Setting | Description |
 | --- | --- |
 | `FILESPACE_ROOT` | Folder or drive to share; defaults to `D:\` |
-| `FILESPACE_CREATE_SHORTCUT` | `true` creates or updates `File Server.lnk` on the Desktop; `false` disables shortcut creation |
+| `FILESPACE_CREATE_SHORTCUT` | `true` creates or updates `File Server.lnk` on the Desktop with the FileSpace logo; `false` disables shortcut creation |
 | `FILESPACE_EMAIL` | Login email for `password` or `both` auth modes |
 | `FILESPACE_PASSWORD` | Login password for `password` or `both` auth modes; use at least 8 characters |
 | `FILESPACE_AUTH_MODE` | `qr`, `password`, or `both`; defaults to QR login |
@@ -283,6 +288,8 @@ Windows Firewall, and whether both devices are on the same network or VPN.
 ```text
 FileSpace/
 |-- fileserver.py       # Complete server and web UI
+|-- logo.png            # FileSpace logo for Markdown/docs
+|-- logo.ico            # FileSpace icon for Windows shortcuts
 |-- .env.example        # Safe settings template
 |-- .gitignore          # Excludes secrets, logs, and local artifacts
 |-- README.md           # This guide

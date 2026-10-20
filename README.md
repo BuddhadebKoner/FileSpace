@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.png" alt="FileSpace logo" width="128">
+</p>
+
 # FileSpace
 
 FileSpace lets you open a folder or drive from a browser and browse your files
@@ -48,7 +52,7 @@ When you run FileSpace, answer the questions like this:
 | Question | Example | Meaning |
 | --- | --- | --- |
 | `FILESPACE_ROOT` | `D:\Shared` | Folder or drive to share |
-| `FILESPACE_CREATE_SHORTCUT` | `Y` | Create a Desktop shortcut |
+| `FILESPACE_CREATE_SHORTCUT` | `Y` | Create a Desktop shortcut with the FileSpace logo |
 | `Use QR login?` | `Y` | Use one-time QR login |
 | `FILESPACE_PUBLIC` | `N` | Restrict who can open the login page |
 | `FILESPACE_ALLOWED_IPS` | `192.168.1.0/24` | Allowed network or devices |
@@ -162,6 +166,8 @@ Usage walkthrough:
 ```text
 FileSpace/
 |-- fileserver.py       # Main launcher
+|-- logo.png            # FileSpace logo for Markdown/docs
+|-- logo.ico            # FileSpace icon for Windows shortcuts
 |-- filespace/          # Application package
 |-- docs/               # Flow and HTTPS guide
 |-- Developer.md        # Developer-facing documentation

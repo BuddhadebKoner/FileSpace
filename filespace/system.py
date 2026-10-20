@@ -51,6 +51,16 @@ def print_terminal_qr(url: str) -> bool:
         return False
 
 
+def shortcut_icon_path(script_path: Path) -> Path | None:
+    """Return the best local logo file for a Windows shortcut icon."""
+    app_dir = script_path.resolve().parent
+    for filename in ("logo.ico", "logo.png"):
+        candidate = app_dir / filename
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def create_desktop_shortcut(script_path: Path, env_path: Path) -> None:
     """Create or update the FileSpace launcher shortcut for this user."""
     powershell = r"""
@@ -63,6 +73,9 @@ $shortcut.TargetPath = $env:FILESPACE_SHORTCUT_TARGET
 $shortcut.Arguments = $env:FILESPACE_SHORTCUT_ARGUMENTS
 $shortcut.WorkingDirectory = $env:FILESPACE_SHORTCUT_WORKING_DIRECTORY
 $shortcut.Description = 'Start the FileSpace server'
+if ($env:FILESPACE_SHORTCUT_ICON) {
+    $shortcut.IconLocation = "$($env:FILESPACE_SHORTCUT_ICON),0"
+}
 $shortcut.Save()
 Write-Output $shortcutPath
 """
@@ -76,6 +89,9 @@ Write-Output $shortcutPath
             "FILESPACE_SHORTCUT_ARGUMENTS": arguments,
             "FILESPACE_SHORTCUT_WORKING_DIRECTORY": str(script_path.parent),
         })
+        icon_path = shortcut_icon_path(script_path)
+        if icon_path is not None:
+            environment["FILESPACE_SHORTCUT_ICON"] = str(icon_path)
         result = subprocess.run(
             [
                 "powershell.exe", "-NoProfile", "-NonInteractive",

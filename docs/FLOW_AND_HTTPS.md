@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="../logo.png" alt="FileSpace logo" width="128">
+</p>
+
 # FileSpace Flow And HTTPS Guide
 
 This document explains how FileSpace works from startup to browser usage, and
@@ -59,7 +63,7 @@ The normal configuration flow is terminal-driven:
    User enters the folder or drive to share.
 
 2. `FILESPACE_CREATE_SHORTCUT`
-   `Y` creates/updates the Desktop shortcut.
+   `Y` creates/updates the Desktop shortcut with the FileSpace logo.
 
 3. `Use QR login?`
    `Y` sets QR login. `N` switches to email/password login.
