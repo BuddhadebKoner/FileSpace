@@ -31,6 +31,18 @@ The server uses Python's standard library for the core file browser. The
 `qrcode` package is recommended for terminal QR login. Pillow is optional and
 only improves image thumbnail generation.
 
+## Setup and usage videos
+
+### Setup
+
+[![Watch setup on YouTube](https://img.shields.io/badge/YouTube-Watch%20setup-red?logo=youtube&logoColor=white)](https://www.youtube.com/watch?v=l5ruuVoDug4)
+
+### How to use
+
+<video src="https://res.cloudinary.com/dnnvq0dg6/video/upload/v1792480337/how_to_use_ds3wmv.mp4" controls width="100%" title="FileSpace usage walkthrough"></video>
+
+[Open usage walkthrough video](https://res.cloudinary.com/dnnvq0dg6/video/upload/v1792480337/how_to_use_ds3wmv.mp4)
+
 ### Recommended installation flow
 
 ```powershell
@@ -51,7 +63,7 @@ FILESPACE_ALLOWED_IPS=192.168.1.0/24
 FILESPACE_PUBLIC=true
 CANDIDATE_FILE_UPLOAD_ENABLED=true
 FILESPACE_UPLOAD_MAX_MB=100
-FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
+FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,mp4,m4v,mov,webm,mkv,ogv,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
 ```
 
 `FILESPACE_ROOT` must point to an existing readable folder or drive. A smaller

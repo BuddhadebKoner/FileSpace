@@ -487,7 +487,7 @@ FILESPACE_PUBLIC=false
 CANDIDATE_FILE_UPLOAD_ENABLED=false
 # Security limits used only when uploads are enabled.
 FILESPACE_UPLOAD_MAX_MB=10
-FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
+FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,mp4,m4v,mov,webm,mkv,ogv,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
 """
 
 PLACEHOLDER_PASSWORD = "change-this-long-password"
@@ -514,13 +514,17 @@ AUTH_MODES = {"qr", "password", "both"}
 UPLOAD_DEFAULT_MAX_MB = 10
 UPLOAD_MAX_CAP_MB = 100
 UPLOAD_BODY_OVERHEAD = 64 * 1024
-UPLOAD_DEFAULT_EXTS = tuple("pdf png jpg jpeg gif webp bmp txt md csv json docx xlsx pptx rtf odt ods odp".split())
+UPLOAD_DEFAULT_EXTS = tuple(
+    "pdf png jpg jpeg gif webp bmp mp4 m4v mov webm mkv ogv txt md csv json "
+    "docx xlsx pptx rtf odt ods odp".split()
+)
 UPLOAD_TEXT_EXTS = {"txt", "md", "csv", "log", "json", "xml", "yaml", "yml"}
 UPLOAD_ZIP_EXTS = {"docx", "xlsx", "pptx", "odt", "ods", "odp"}
+UPLOAD_VIDEO_EXTS = {"mp4", "m4v", "mov", "webm", "mkv", "ogv"}
 UPLOAD_RATE_WINDOW_SECONDS = 60
 UPLOAD_MAX_REQUESTS_PER_WINDOW = 12
 UPLOAD_QUOTA_WINDOW_SECONDS = 10 * 60
-UPLOAD_QUOTA_BYTES = 100 * 1024 * 1024
+UPLOAD_QUOTA_BYTES = 500 * 1024 * 1024
 WINDOWS_RESERVED_NAMES = {
     "CON", "PRN", "AUX", "NUL",
     "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
@@ -562,6 +566,12 @@ UPLOAD_MIME_BY_EXT = {
     "gif": {"image/gif"},
     "webp": {"image/webp"},
     "bmp": {"image/bmp", "image/x-ms-bmp"},
+    "mp4": {"video/mp4", "application/mp4"},
+    "m4v": {"video/mp4", "video/x-m4v", "application/mp4"},
+    "mov": {"video/quicktime", "video/mp4"},
+    "webm": {"video/webm"},
+    "mkv": {"video/x-matroska", "video/webm"},
+    "ogv": {"video/ogg", "application/ogg"},
     "txt": {"text/plain"},
     "md": {"text/markdown", "text/plain"},
     "csv": {"text/csv", "application/csv", "text/plain"},
@@ -626,6 +636,12 @@ def upload_signature_ok(ext: str, data: bytes) -> bool:
         return data.startswith(b"BM")
     if ext == "rtf":
         return data.lstrip().startswith(b"{\\rtf")
+    if ext in {"mp4", "m4v", "mov"}:
+        return len(data) >= 12 and data[4:8] == b"ftyp"
+    if ext in {"webm", "mkv"}:
+        return data.startswith(b"\x1a\x45\xdf\xa3")
+    if ext == "ogv":
+        return data.startswith(b"OggS")
     if ext in UPLOAD_ZIP_EXTS:
         return data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
     if ext in UPLOAD_TEXT_EXTS:
