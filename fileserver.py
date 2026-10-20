@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""FileSpace: a single-file, styled, read-only file browser for Windows.
+"""FileSpace: a single-file, styled file browser for Windows.
 
 Run:
     python fileserver.py
@@ -15,9 +15,10 @@ Settings live in a ".env" file next to this script (created on first run):
     FILESPACE_AUTH_MODE=qr
     FILESPACE_ALLOWED_IPS=203.0.113.7, 100.101.102.103
     FILESPACE_PUBLIC=false
+    CANDIDATE_FILE_UPLOAD_ENABLED=false
 
 The .env file is re-read automatically when it changes, so you can edit the
-allowed IPs or flip FILESPACE_PUBLIC without restarting the server.
+allowed IPs or flip upload access without restarting the server.
 
 Preview: images, videos, audio, PDFs and text files open in an in-page viewer.
 The FileSpace folder itself (this script, .env, logs) is never shared.
@@ -48,6 +49,8 @@ import time
 from datetime import datetime
 from collections import OrderedDict, deque
 from dataclasses import dataclass
+from email import policy
+from email.parser import BytesParser
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -106,6 +109,9 @@ kbd{border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:11p
 .crumbs button{background:none;border:0;color:var(--accent);padding:4px 6px;border-radius:8px;font-weight:650;font-size:13px}
 .crumbs button:hover{background:#8ea2ff14}.crumbs button.cur{color:var(--text)}.sep{color:#556485}
 .tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.filepick{display:none}
+.ustatus{color:var(--muted);font-size:12px;margin:0 4px 12px;min-height:18px}.ustatus.err{color:#fca5a5}
+.drop{position:fixed;inset:12px;z-index:70;display:grid;place-items:center;border:2px dashed var(--accent);border-radius:18px;background:#0b1120dd;color:var(--text);font-weight:800;box-shadow:0 20px 80px #0009}
 .chips{display:flex;gap:6px;overflow-x:auto;max-width:100%;scrollbar-width:none}
 .chip{background:none;border:1px solid var(--line);border-radius:999px;padding:6px 12px;font-size:12px;color:var(--muted);white-space:nowrap}
 .chip.on{background:#8ea2ff1f;border-color:var(--accent);color:var(--text)}
@@ -183,14 +189,20 @@ select.btn{padding-right:6px;appearance:auto}select.btn option{background:#18233
   <button class="btn" id="up" type="button" title="Parent folder">↑</button>
   <nav class="crumbs" id="crumbs" aria-label="Breadcrumb"></nav>
   <div class="tools">
+    <button class="btn" id="mkdirBtn" type="button" hidden>New folder</button>
+    <button class="btn" id="uploadBtn" type="button" hidden>Upload</button>
+    <input class="filepick" id="uploadFile" type="file" multiple hidden>
     <div class="chips" id="chips"></div>
     <select class="btn" id="sort" aria-label="Sort by"><option value="name">Name</option><option value="new">Newest first</option><option value="old">Oldest first</option><option value="big">Largest first</option></select>
     <div class="seg"><button id="vList" type="button" title="List view">☰</button><button id="vGrid" type="button" title="Grid view">▦</button></div>
   </div>
 </div>
 <div class="status" id="status"></div>
+<div class="ustatus" id="uploadStatus" hidden></div>
 <div id="content"></div>
 </div>
+
+<div class="drop" id="drop" hidden>Drop files to upload</div>
 
 <div class="viewer" id="viewer" hidden role="dialog" aria-modal="true" aria-label="File preview">
   <div class="vhead">
@@ -227,6 +239,22 @@ const dlUrl=e=>'/api/download?path='+enc(e.relative_path);
 
 function signedOut(){if(leaving)return;leaving=true;try{sessionStorage.setItem('fs_out','1')}catch{}fetch('/logout?reason=idle',{method:'POST'}).catch(()=>{}).finally(()=>location.reload())}
 async function api(url){const r=await fetch(url,{cache:'no-store'});if(r.status===401){signedOut();throw Error('Signed out')}const d=await r.json().catch(()=>({error:'Invalid server response'}));if(!r.ok)throw Error(d.error||('Request failed ('+r.status+')'));return d}
+
+/* ---------- uploads ---------- */
+let uploadCfg=BOOT.upload||{enabled:false,max_bytes:0,extensions:[],accept:[]},uploadBusy=false,dragDepth=0;
+function applyUploadConfig(cfg){uploadCfg=cfg||uploadCfg;const on=!!uploadCfg.enabled;$('#mkdirBtn').hidden=!on;$('#uploadBtn').hidden=!on;$('#uploadFile').disabled=!on;$('#uploadFile').accept=(uploadCfg.accept||[]).join(',');if(!on){$('#drop').hidden=true;dragDepth=0;setUploadMsg('',false)}}
+function setUploadMsg(msg,bad){const el=$('#uploadStatus');el.hidden=!msg;el.className='ustatus'+(bad?' err':'');el.textContent=msg||''}
+function uploadError(text){setUploadMsg(text||'Upload failed.',true)}
+function checkUploadFile(file){if(!uploadCfg.enabled)return 'Uploads are disabled.';if(!file||!file.name)return 'Choose a file to upload.';if(uploadCfg.max_bytes&&file.size>uploadCfg.max_bytes)return file.name+' is larger than '+fmtSize(uploadCfg.max_bytes)+'.';const ext=(file.name.split('.').pop()||'').toLowerCase();if(!(uploadCfg.extensions||[]).includes(ext))return file.name+' is not an allowed file type.';return''}
+function uploadOne(file,n,total){return new Promise((resolve,reject)=>{const fd=new FormData();fd.append('file',file,file.name);const xhr=new XMLHttpRequest();xhr.open('POST','/api/upload?path='+enc(st.path));xhr.upload.onprogress=e=>{const p=e.lengthComputable?Math.round(e.loaded/e.total*100):0;setUploadMsg('Uploading '+file.name+(total>1?' ('+n+' of '+total+')':'')+(p?' - '+p+'%':''),false)};xhr.onload=()=>{let d={};try{d=JSON.parse(xhr.responseText||'{}')}catch{}if(xhr.status===401){signedOut();return reject(Error('Signed out'))}if(xhr.status<200||xhr.status>=300)return reject(Error(d.error||('Upload failed ('+xhr.status+')')));resolve(d)};xhr.onerror=()=>reject(Error('Could not reach the server.'));xhr.send(fd)})}
+async function uploadFiles(files){if(uploadBusy)return;const list=Array.from(files||[]).filter(f=>f&&f.name);if(!list.length)return;for(const f of list){const err=checkUploadFile(f);if(err){uploadError(err);return}}uploadBusy=true;$('#uploadBtn').disabled=true;try{for(let i=0;i<list.length;i++)await uploadOne(list[i],i+1,list.length);setUploadMsg('Upload complete.',false);await loadDir(st.path)}catch(e){if(e.message!=='Signed out')uploadError(e.message)}finally{uploadBusy=false;$('#uploadBtn').disabled=false;$('#uploadFile').value=''}}
+$('#uploadBtn').onclick=()=>$('#uploadFile').click();
+$('#uploadFile').onchange=e=>uploadFiles(e.target.files);
+$('#mkdirBtn').onclick=async()=>{if(uploadBusy)return;const name=prompt('Folder name');if(name==null)return;const clean=name.trim();if(!clean){uploadError('Folder name is required.');return}$('#mkdirBtn').disabled=true;try{const r=await fetch('/api/folder?path='+enc(st.path),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:clean})});const d=await r.json().catch(()=>({}));if(r.status===401){signedOut();return}if(!r.ok)throw Error(d.error||('Could not create folder ('+r.status+')'));setUploadMsg('Folder created.',false);go(d.path||st.path)}catch(e){uploadError(e.message)}finally{$('#mkdirBtn').disabled=false}};
+document.addEventListener('dragenter',e=>{if(!uploadCfg.enabled||uploadBusy)return;if(Array.from(e.dataTransfer&&e.dataTransfer.types||[]).includes('Files')){e.preventDefault();dragDepth++;$('#drop').hidden=false}});
+document.addEventListener('dragover',e=>{if(!uploadCfg.enabled||uploadBusy)return;if(Array.from(e.dataTransfer&&e.dataTransfer.types||[]).includes('Files'))e.preventDefault()});
+['dragleave','drop'].forEach(ev=>document.addEventListener(ev,e=>{if(!uploadCfg.enabled)return;if(ev==='drop')e.preventDefault();dragDepth=Math.max(0,dragDepth-1);if(ev==='drop'||dragDepth===0)$('#drop').hidden=true;if(ev==='drop')uploadFiles(e.dataTransfer.files)}));
+applyUploadConfig(uploadCfg);
 
 /* ---------- navigation ---------- */
 function pathFromHash(){try{return location.hash.replace(/^#\/?/,'').split('/').filter(Boolean).map(decodeURIComponent).join('/')}catch{return ''}}
@@ -315,7 +343,7 @@ $('#health').onclick=e=>{e.stopPropagation();const p=$('#hpop');p.hidden=!p.hidd
 document.addEventListener('click',e=>{if(!e.target.closest('#hpop,#health'))$('#hpop').hidden=true});
 async function poll(){const t0=performance.now(),ac=new AbortController(),to=setTimeout(()=>ac.abort(),6000);
  try{const r=await fetch('/api/health',{cache:'no-store',signal:ac.signal});clearTimeout(to);if(r.status===401){signedOut();return}
-  const d=await r.json(),ms=performance.now()-t0;fails=0;$('#offline').hidden=true;lastHealth=d;setDeadline(d.idle_left);setPill(ms>2500?'slow':d.status);if(!$('#hpop').hidden)renderPop()}
+  const d=await r.json(),ms=performance.now()-t0;fails=0;$('#offline').hidden=true;lastHealth=d;if(d.upload)applyUploadConfig(d.upload);setDeadline(d.idle_left);setPill(ms>2500?'slow':d.status);if(!$('#hpop').hidden)renderPop()}
  catch{clearTimeout(to);if(++fails>=2){setPill('down');$('#offline').hidden=false}}}
 async function ping(){lastPing=Date.now();try{const r=await fetch('/api/keepalive',{cache:'no-store'});if(r.status===401){signedOut();return}const d=await r.json();setDeadline(d.idle_left);$('#idle').hidden=true}catch{}}
 function activity(){if(Date.now()-lastPing>15000)ping()}
@@ -454,6 +482,12 @@ FILESPACE_ALLOWED_IPS=
 # false = only the IPs above can reach the site (everyone else gets "Access denied")
 # true  = any device can reach the login page (login is still required)
 FILESPACE_PUBLIC=false
+
+# Candidate uploads are disabled by default. Set to true only on trusted networks.
+CANDIDATE_FILE_UPLOAD_ENABLED=false
+# Security limits used only when uploads are enabled.
+FILESPACE_UPLOAD_MAX_MB=10
+FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
 """
 
 PLACEHOLDER_PASSWORD = "change-this-long-password"
@@ -475,7 +509,23 @@ SEARCH_MAX_RESULTS = 500
 CHUNK = 256 * 1024
 LOG_MAX_BYTES = 5 * 1024 * 1024   # logs.txt is rotated to logs.old.txt above this size
 TRUE_VALUES = {"1", "true", "yes", "on"}
+FALSE_VALUES = {"0", "false", "no", "off", ""}
 AUTH_MODES = {"qr", "password", "both"}
+UPLOAD_DEFAULT_MAX_MB = 10
+UPLOAD_MAX_CAP_MB = 100
+UPLOAD_BODY_OVERHEAD = 64 * 1024
+UPLOAD_DEFAULT_EXTS = tuple("pdf png jpg jpeg gif webp bmp txt md csv json docx xlsx pptx rtf odt ods odp".split())
+UPLOAD_TEXT_EXTS = {"txt", "md", "csv", "log", "json", "xml", "yaml", "yml"}
+UPLOAD_ZIP_EXTS = {"docx", "xlsx", "pptx", "odt", "ods", "odp"}
+UPLOAD_RATE_WINDOW_SECONDS = 60
+UPLOAD_MAX_REQUESTS_PER_WINDOW = 12
+UPLOAD_QUOTA_WINDOW_SECONDS = 10 * 60
+UPLOAD_QUOTA_BYTES = 100 * 1024 * 1024
+WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+}
 
 CSP = ("default-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; "
        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'")
@@ -504,6 +554,26 @@ for _ext in ("txt md markdown log csv tsv json xml yaml yml ini cfg conf toml py
 DOC_EXTS = set("doc docx xls xlsx ppt pptx rtf odt ods odp".split())
 ARCHIVE_EXTS = set("zip rar 7z gz tar bz2 xz".split())
 THUMB_EXTS = {"png", "jpg", "jpeg", "gif", "webp", "bmp"}
+UPLOAD_MIME_BY_EXT = {
+    "pdf": {"application/pdf"},
+    "png": {"image/png"},
+    "jpg": {"image/jpeg"},
+    "jpeg": {"image/jpeg"},
+    "gif": {"image/gif"},
+    "webp": {"image/webp"},
+    "bmp": {"image/bmp", "image/x-ms-bmp"},
+    "txt": {"text/plain"},
+    "md": {"text/markdown", "text/plain"},
+    "csv": {"text/csv", "application/csv", "text/plain"},
+    "json": {"application/json", "text/json", "text/plain"},
+    "docx": {"application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/zip"},
+    "xlsx": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/zip"},
+    "pptx": {"application/vnd.openxmlformats-officedocument.presentationml.presentation", "application/zip"},
+    "rtf": {"application/rtf", "text/rtf", "text/plain"},
+    "odt": {"application/vnd.oasis.opendocument.text", "application/zip"},
+    "ods": {"application/vnd.oasis.opendocument.spreadsheet", "application/zip"},
+    "odp": {"application/vnd.oasis.opendocument.presentation", "application/zip"},
+}
 
 
 def file_ext(name: str) -> str:
@@ -527,6 +597,95 @@ def fmt_bytes(n: float) -> str:
             return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
         n /= 1024
     return str(n)
+
+
+def looks_like_text(data: bytes) -> bool:
+    sample = data[:8192]
+    if b"\x00" in sample:
+        return False
+    try:
+        sample.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return False
+    bad = sum(1 for b in sample if b < 32 and b not in (9, 10, 13))
+    return bad <= max(4, len(sample) // 100)
+
+
+def upload_signature_ok(ext: str, data: bytes) -> bool:
+    if ext == "pdf":
+        return data.startswith(b"%PDF-")
+    if ext in {"jpg", "jpeg"}:
+        return data.startswith(b"\xff\xd8\xff")
+    if ext == "png":
+        return data.startswith(b"\x89PNG\r\n\x1a\n")
+    if ext == "gif":
+        return data.startswith((b"GIF87a", b"GIF89a"))
+    if ext == "webp":
+        return len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"
+    if ext == "bmp":
+        return data.startswith(b"BM")
+    if ext == "rtf":
+        return data.lstrip().startswith(b"{\\rtf")
+    if ext in UPLOAD_ZIP_EXTS:
+        return data.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"))
+    if ext in UPLOAD_TEXT_EXTS:
+        if not looks_like_text(data):
+            return False
+        if ext == "json":
+            try:
+                json.loads(data.decode("utf-8-sig"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return False
+        return True
+    return False
+
+
+def validate_upload_file(filename: str, content_type: str, data: bytes, cfg: "Settings") -> str:
+    ext = file_ext(filename)
+    if not ext or ext not in cfg.upload_allowed_exts or ext not in UPLOAD_MIME_BY_EXT:
+        raise ValueError("This file type is not allowed.")
+    if not data:
+        raise ValueError("Uploaded file is empty.")
+    if len(data) > cfg.upload_max_bytes:
+        raise ValueError(f"File is larger than {fmt_bytes(cfg.upload_max_bytes)}.")
+    normalized_type = (content_type or "").split(";", 1)[0].strip().lower()
+    if normalized_type and normalized_type != "application/octet-stream":
+        if normalized_type not in UPLOAD_MIME_BY_EXT[ext]:
+            raise ValueError("The uploaded file content type is not allowed.")
+    if not upload_signature_ok(ext, data):
+        raise ValueError("The uploaded file content does not match its extension.")
+    return ext
+
+
+def safe_upload_filename(original: str, ext: str) -> str:
+    name = original.replace("\\", "/").split("/")[-1]
+    stem = os.path.splitext(name)[0]
+    stem = _CTRL.sub(" ", stem)
+    stem = re.sub(r'[<>:"/\\|?*]+', "_", stem)
+    stem = re.sub(r"\s+", " ", stem).strip(" ._")
+    if not stem:
+        stem = "upload"
+    stem = stem[:72].rstrip(" ._") or "upload"
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    token = secrets.token_hex(8)
+    return f"{stem}-{stamp}-{token}.{ext}"
+
+
+def validate_folder_name(name: str) -> str:
+    value = (name or "").strip()
+    if not value:
+        raise ValueError("Folder name is required.")
+    if len(value) > 120:
+        raise ValueError("Folder name is too long.")
+    if value in (".", "..") or "/" in value or "\\" in value or ":" in value:
+        raise ValueError("Folder name is not allowed.")
+    if value.endswith((".", " ")) or value.startswith(".") or skip_name(value):
+        raise ValueError("Folder name is not allowed.")
+    if re.search(r'[<>:"/\\|?*\x00-\x1f\x7f]', value):
+        raise ValueError("Folder name contains invalid characters.")
+    if value.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES:
+        raise ValueError("Folder name is reserved by Windows.")
+    return value
 
 
 class ThumbCache:
@@ -617,6 +776,10 @@ class Settings:
     public: bool
     networks: tuple
     bad_entries: tuple
+    candidate_file_upload_enabled: bool
+    upload_max_bytes: int
+    upload_allowed_exts: tuple[str, ...]
+    upload_config_errors: tuple[str, ...]
     fingerprint: str
 
     @property
@@ -650,6 +813,49 @@ def parse_env(text: str) -> dict:
     return data
 
 
+def config_bool(data: dict, key: str, default: bool = False) -> bool:
+    raw = data.get(key)
+    if raw is None:
+        return default
+    value = raw.strip().lower()
+    if value in TRUE_VALUES:
+        return True
+    if value in FALSE_VALUES:
+        return False
+    return default
+
+
+def parse_upload_max_bytes(data: dict) -> tuple[int, str | None]:
+    raw = data.get("FILESPACE_UPLOAD_MAX_MB", str(UPLOAD_DEFAULT_MAX_MB)).strip()
+    try:
+        mb = int(raw)
+    except ValueError:
+        return UPLOAD_DEFAULT_MAX_MB * 1024 * 1024, "FILESPACE_UPLOAD_MAX_MB is invalid; using 10 MB"
+    if mb <= 0:
+        return UPLOAD_DEFAULT_MAX_MB * 1024 * 1024, "FILESPACE_UPLOAD_MAX_MB must be positive; using 10 MB"
+    if mb > UPLOAD_MAX_CAP_MB:
+        return UPLOAD_MAX_CAP_MB * 1024 * 1024, f"FILESPACE_UPLOAD_MAX_MB capped at {UPLOAD_MAX_CAP_MB} MB"
+    return mb * 1024 * 1024, None
+
+
+def parse_upload_exts(data: dict) -> tuple[tuple[str, ...], str | None]:
+    raw = data.get("FILESPACE_UPLOAD_ALLOWED_EXTENSIONS", ",".join(UPLOAD_DEFAULT_EXTS))
+    values = []
+    ignored = []
+    for item in re.split(r"[,\s;]+", raw):
+        ext = item.strip().lower().lstrip(".")
+        if not ext:
+            continue
+        if ext in UPLOAD_MIME_BY_EXT and ext not in values:
+            values.append(ext)
+        else:
+            ignored.append(ext)
+    if not values:
+        return UPLOAD_DEFAULT_EXTS, "FILESPACE_UPLOAD_ALLOWED_EXTENSIONS had no supported values; using defaults"
+    error = f"ignored unsupported upload extensions: {', '.join(ignored)}" if ignored else None
+    return tuple(values), error
+
+
 def build_settings(data: dict) -> Settings:
     email = data.get("FILESPACE_EMAIL", "").strip()
     password = data.get("FILESPACE_PASSWORD", "")
@@ -657,6 +863,10 @@ def build_settings(data: dict) -> Settings:
     if auth_mode not in AUTH_MODES:
         auth_mode = "qr"
     public = data.get("FILESPACE_PUBLIC", "false").strip().lower() in TRUE_VALUES
+    upload_enabled = config_bool(data, "CANDIDATE_FILE_UPLOAD_ENABLED", False)
+    upload_max_bytes, upload_max_error = parse_upload_max_bytes(data)
+    upload_allowed_exts, upload_ext_error = parse_upload_exts(data)
+    upload_config_errors = tuple(e for e in (upload_max_error, upload_ext_error) if e)
     networks, bad = [], []
     for raw in re.split(r"[,\s;]+", data.get("FILESPACE_ALLOWED_IPS", "")):
         if not raw:
@@ -666,7 +876,9 @@ def build_settings(data: dict) -> Settings:
         except ValueError:
             bad.append(raw)
     fingerprint = hashlib.sha256(f"{auth_mode}\0{email.lower()}\0{password}".encode("utf-8")).hexdigest()
-    return Settings(email, password, auth_mode, public, tuple(networks), tuple(bad), fingerprint)
+    return Settings(email, password, auth_mode, public, tuple(networks), tuple(bad),
+                    upload_enabled, upload_max_bytes, upload_allowed_exts, upload_config_errors,
+                    fingerprint)
 
 
 def describe(s: Settings) -> str:
@@ -676,7 +888,8 @@ def describe(s: Settings) -> str:
         mode = f"RESTRICTED ({len(s.networks)} allowed IP entr{'y' if len(s.networks) == 1 else 'ies'}: " \
                f"{', '.join(str(n) for n in s.networks) or 'none'})"
     extra = f" | ignored invalid IPs: {', '.join(s.bad_entries)}" if s.bad_entries else ""
-    return f"{mode} | auth={s.auth_mode}{extra}"
+    uploads = "on" if s.candidate_file_upload_enabled else "off"
+    return f"{mode} | auth={s.auth_mode} | uploads={uploads}{extra}"
 
 
 class ConfigStore:
@@ -864,6 +1077,29 @@ class Throttle:
             self._d.pop(ip, None)
 
 
+class UploadRateLimiter:
+    def __init__(self, max_requests: int, max_bytes: int, window: int):
+        self.max_requests = max_requests
+        self.max_bytes = max_bytes
+        self.window = window
+        self._d: dict[str, deque] = {}
+        self._lock = threading.Lock()
+
+    def check(self, key: str, size: int) -> int:
+        now = time.time()
+        cutoff = now - self.window
+        with self._lock:
+            events = self._d.setdefault(key, deque())
+            while events and events[0][0] < cutoff:
+                events.popleft()
+            used = sum(n for _, n in events)
+            if len(events) >= self.max_requests or used + size > self.max_bytes:
+                oldest = events[0][0] if events else now
+                return max(1, int(oldest + self.window - now))
+            events.append((now, size))
+            return 0
+
+
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
@@ -1008,6 +1244,8 @@ def main():
     sessions = SessionStore(on_end=lambda ip, why: log.write(ip, "SESSION_END", why))
     throttle = Throttle()
     qr_throttle = Throttle()
+    upload_rate = UploadRateLimiter(UPLOAD_MAX_REQUESTS_PER_WINDOW, UPLOAD_QUOTA_BYTES,
+                                    UPLOAD_QUOTA_WINDOW_SECONDS)
 
     # --- never share the FileSpace app itself (script, .env, logs) -----------
     app_file = Path(__file__).resolve()
@@ -1130,6 +1368,24 @@ def main():
         else:
             n = len(cfg.networks)
             add("Access", "ok", f"Restricted to {n} allowed IP entr{'y' if n == 1 else 'ies'} + this PC")
+        if cfg.candidate_file_upload_enabled:
+            try:
+                probe = root / f".filespace-write-check-{secrets.token_hex(4)}.tmp"
+                with open(probe, "xb"):
+                    pass
+                probe.unlink()
+                upload_status, upload_detail = "ok", (
+                    f"Enabled; max {fmt_bytes(cfg.upload_max_bytes)}; "
+                    f"{len(cfg.upload_allowed_exts)} allowed type(s)"
+                )
+            except OSError:
+                upload_status, upload_detail = "fail", "Enabled but shared folder is not writable"
+        else:
+            upload_status, upload_detail = "ok", "Disabled by CANDIDATE_FILE_UPLOAD_ENABLED=false"
+        if cfg.upload_config_errors and upload_status != "fail":
+            upload_status = "warn"
+            upload_detail += "; " + "; ".join(cfg.upload_config_errors)
+        add("Candidate writes", upload_status, upload_detail)
         if ffmpeg:
             add("Browser video", "ok", "FFmpeg is available for MKV playback")
         else:
@@ -1139,8 +1395,22 @@ def main():
         return out
 
     root_label = root.name or str(root)
-    boot = "const BOOT=" + json.dumps({"root": root_label, "idle": SESSION_IDLE_SECONDS}).replace("</", "<\\/") + ";"
-    page_html = PAGE.replace("/*__BOOT__*/", boot)
+
+    def upload_boot(cfg: Settings) -> dict:
+        return {
+            "enabled": cfg.candidate_file_upload_enabled,
+            "max_bytes": cfg.upload_max_bytes,
+            "extensions": list(cfg.upload_allowed_exts),
+            "accept": [f".{ext}" for ext in cfg.upload_allowed_exts],
+        }
+
+    def render_app_page(cfg: Settings) -> str:
+        boot = "const BOOT=" + json.dumps({
+            "root": root_label,
+            "idle": SESSION_IDLE_SECONDS,
+            "upload": upload_boot(cfg),
+        }).replace("</", "<\\/") + ";"
+        return PAGE.replace("/*__BOOT__*/", boot)
 
     def resolve(rel: str) -> Path:
         parts = [p for p in rel.split("/") if p]
@@ -1202,6 +1472,59 @@ def main():
         def send_html(self, status, html):
             self.send_bytes(status, html.encode("utf-8"), "text/html; charset=utf-8")
 
+        def read_json_body(self, max_length: int) -> dict:
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                raise ValueError("Bad request.")
+            if length <= 0 or length > max_length:
+                raise ValueError("Bad request.")
+            try:
+                body = json.loads(self.rfile.read(length))
+            except (json.JSONDecodeError, UnicodeDecodeError):
+                raise ValueError("Bad request.")
+            if not isinstance(body, dict):
+                raise ValueError("Bad request.")
+            return body
+
+        def read_upload_file(self, cfg: Settings) -> tuple[str, str, bytes]:
+            content_type = self.headers.get("Content-Type", "")
+            if content_type.split(";", 1)[0].strip().lower() != "multipart/form-data":
+                raise ValueError("Upload must be multipart/form-data.")
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                raise ValueError("Bad request.")
+            if length <= 0:
+                raise ValueError("Bad request.")
+            if length > cfg.upload_max_bytes + UPLOAD_BODY_OVERHEAD:
+                self.close_connection = True
+                raise OverflowError(f"Upload is larger than {fmt_bytes(cfg.upload_max_bytes)}.")
+            wait = upload_rate.check(self.client_ip(), length)
+            if wait:
+                self.close_connection = True
+                raise RuntimeError(f"RATE_LIMIT:{wait}")
+            raw = self.rfile.read(length)
+            header = f"Content-Type: {content_type}\r\nMIME-Version: 1.0\r\n\r\n".encode("utf-8", "replace")
+            msg = BytesParser(policy=policy.default).parsebytes(header + raw)
+            if not msg.is_multipart():
+                raise ValueError("Bad upload request.")
+            files = []
+            for part in msg.iter_parts():
+                if part.get_content_disposition() != "form-data":
+                    continue
+                field_name = part.get_param("name", header="content-disposition")
+                filename = part.get_filename()
+                if field_name == "file" and filename:
+                    payload = part.get_payload(decode=True)
+                    if payload is None:
+                        content = part.get_content()
+                        payload = content.encode("utf-8") if isinstance(content, str) else bytes(content)
+                    files.append((filename, part.get_content_type(), payload))
+            if len(files) != 1:
+                raise ValueError("Upload exactly one file.")
+            return files[0]
+
         # ---- access control ------------------------------------------
         def client_ip(self) -> str:
             return self.client_address[0]
@@ -1257,7 +1580,7 @@ def main():
                 if route == "/healthz":
                     return self.api_healthz()
                 if route == "/":
-                    return self.send_html(200, page_html if self.authed(cfg) else render_login_page(cfg))
+                    return self.send_html(200, render_app_page(cfg) if self.authed(cfg) else render_login_page(cfg))
                 if route == "/auth/qr":
                     if not cfg.qr_login_enabled:
                         return self.send_json(404, {"error": "Not found"})
@@ -1311,7 +1634,8 @@ def main():
             cfg = store.get()
             if not self.ip_allowed(cfg):
                 return self.deny()
-            route = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            route = parsed.path
             try:
                 if route == "/auth/qr/consume":
                     return self.api_qr_consume(cfg)
@@ -1325,9 +1649,50 @@ def main():
                     log.write(self.client_ip(), "LOGOUT", "signed out after inactivity" if reason == "idle" else "")
                     expire = self.expired_session_cookie()
                     return self.send_json(200, {"ok": True}, extra=[("Set-Cookie", expire)])
+                if route.startswith("/api/"):
+                    if not self.authed(cfg):
+                        log.write(self.client_ip(), "UNAUTHORIZED", f"{route} without a valid session")
+                        return self.send_json(401, {"error": "Please sign in."})
+                    if route in {"/api/upload", "/api/folder"} and not cfg.candidate_file_upload_enabled:
+                        log.write(self.client_ip(), "WRITE_DISABLED", f"{route} blocked")
+                        return self.send_json(403, {"error": "Candidate file uploads are disabled."})
+                    query = parse_qs(parsed.query)
+                    rel = fmt_path(query.get("path", [""])[0])
+                    if route == "/api/upload":
+                        return self.api_upload(rel, cfg)
+                    if route == "/api/folder":
+                        return self.api_create_folder(rel)
                 self.send_json(404, {"error": "Not found"})
+            except OverflowError as e:
+                self.send_json(413, {"error": str(e) or "Upload is too large."})
+            except ValueError as e:
+                self.send_json(400, {"error": str(e) or "Bad request."})
+            except PermissionError as e:
+                log.write(self.client_ip(), "ACCESS_DENIED", f"{route} path={parse_qs(parsed.query).get('path', [''])[0]}")
+                self.send_json(403, {"error": str(e) or "Access denied"})
+            except FileExistsError:
+                self.send_json(409, {"error": "A folder with that name already exists."})
+            except FileNotFoundError:
+                self.send_json(404, {"error": "Not found"})
+            except RuntimeError as e:
+                message = str(e)
+                if message.startswith("RATE_LIMIT:"):
+                    wait = message.split(":", 1)[1] or "60"
+                    return self.send_json(429, {"error": "Too many uploads. Try again later."},
+                                          extra=[("Retry-After", wait)])
+                print(f"[error] {self.path}: {e}", flush=True)
+                try:
+                    self.send_json(503, {"error": "Upload is temporarily unavailable."})
+                except OSError:
+                    pass
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
+            except Exception as e:
+                print(f"[error] {self.path}: {e!r}", flush=True)
+                try:
+                    self.send_json(500, {"error": "Server error"})
+                except OSError:
+                    pass
 
         # ---- login ----------------------------------------------------
         def api_qr_consume(self, cfg: Settings):
@@ -1402,6 +1767,72 @@ def main():
                 return self.send_json(429, {"error": f"Too many attempts. Try again in {locked // 60} minutes."},
                                       extra=[("Retry-After", str(locked))])
             self.send_json(401, {"error": "Incorrect email or password."})
+
+        # ---- write API -----------------------------------------------
+        def writable_folder(self, rel: str) -> Path:
+            target = resolve(rel)
+            if not target.is_dir():
+                raise FileNotFoundError
+            try:
+                st = target.stat()
+            except OSError:
+                raise FileNotFoundError
+            if hidden_attr(st):
+                raise PermissionError("Access denied")
+            return target
+
+        def api_create_folder(self, rel: str):
+            parent = self.writable_folder(rel)
+            body = self.read_json_body(2048)
+            name = validate_folder_name(str(body.get("name", "")))
+            target = parent.joinpath(name).resolve()
+            try:
+                target.relative_to(root)
+            except ValueError:
+                raise PermissionError("Access denied")
+            if is_excluded(target):
+                raise PermissionError("Access denied")
+            target.mkdir()
+            st = target.stat()
+            entry = make_entry(name, rel, True, st)
+            log.write(self.client_ip(), "MKDIR", f"/{entry['relative_path']}")
+            self.send_json(201, {"ok": True, "path": entry["relative_path"], "entry": entry})
+
+        def api_upload(self, rel: str, cfg: Settings):
+            parent = self.writable_folder(rel)
+            filename, content_type, data = self.read_upload_file(cfg)
+            try:
+                ext = validate_upload_file(filename, content_type, data, cfg)
+            except ValueError as e:
+                if str(e).startswith("File is larger"):
+                    raise OverflowError(str(e))
+                raise
+            safe_name = safe_upload_filename(filename, ext)
+            final = parent.joinpath(safe_name).resolve()
+            try:
+                final.relative_to(root)
+            except ValueError:
+                raise PermissionError("Access denied")
+            if is_excluded(final):
+                raise PermissionError("Access denied")
+            temp_name = f".{safe_name}.{secrets.token_hex(8)}.uploading"
+            temporary = parent / temp_name
+            try:
+                with open(temporary, "xb") as fh:
+                    fh.write(data)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(temporary, final)
+            except OSError:
+                try:
+                    temporary.unlink()
+                except OSError:
+                    pass
+                raise RuntimeError("Could not store the uploaded file.")
+            st = final.stat()
+            entry = make_entry(safe_name, rel, False, st)
+            log.write(self.client_ip(), "UPLOAD", f"/{entry['relative_path']} ({len(data)} bytes)")
+            self.send_json(201, {"ok": True, "path": rel, "filename": safe_name, "entry": entry})
 
         # ---- file API -------------------------------------------------
         def api_list(self, rel: str):
@@ -1483,7 +1914,8 @@ def main():
             overall = max((c["status"] for c in checks), key=lambda x: order[x], default="ok")
             self.send_json(200, {"status": overall, "uptime": int(time.time() - START_TIME),
                                  "idle_left": sessions.remaining(self.session_token()),
-                                 "idle_limit": SESSION_IDLE_SECONDS, "checks": checks})
+                                 "idle_limit": SESSION_IDLE_SECONDS, "checks": checks,
+                                 "upload": upload_boot(cfg)})
 
         def api_healthz(self):
             """Public, minimal liveness probe (still limited by the IP allowlist)."""
@@ -1610,7 +2042,10 @@ def main():
         else:
             print(" QR package  : install qrcode to render the QR directly in this terminal")
             print(f" Login link  : {startup_qr_url}")
-    print(" Read-only   : file changes/deletes/uploads are disabled")
+    if cfg.candidate_file_upload_enabled:
+        print(f" Write mode  : authenticated users can create folders and upload files up to {fmt_bytes(cfg.upload_max_bytes)}")
+    else:
+        print(" Read-only   : folder creation, file changes, deletes, and uploads are disabled")
     print(f" Access      : {describe(cfg)}")
     if cfg.qr_login_enabled and not HAVE_QRCODE:
         print(" WARNING     : QR auth is enabled, but terminal QR rendering needs: pip install qrcode")

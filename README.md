@@ -1,8 +1,9 @@
 # FileSpace
 
-FileSpace is a personal, read-only web file browser for Windows. Clone the
-repository, configure one `.env` file, and run one Python command to browse a
-folder or an entire drive from a browser.
+FileSpace is a personal web file browser for Windows. It is read-only by
+default, with an optional authenticated upload mode. Clone the repository,
+configure one `.env` file, and run one Python command to browse a folder or an
+entire drive from a browser.
 
 Repository: <https://github.com/BuddhadebKoner/FileSpace>
 
@@ -16,8 +17,9 @@ Repository: <https://github.com/BuddhadebKoner/FileSpace>
 - Search recursively within the selected root.
 - Protect access with QR-code login, optional email/password fallback, IP
   allowlisting, throttling, session expiry, security headers, and activity logs.
-- Keep the shared filesystem read-only: no upload, edit, rename, or delete
-  operations are provided.
+- Keep the shared filesystem read-only by default.
+- Optionally allow authenticated users to create folders and upload permitted
+  file types when `CANDIDATE_FILE_UPLOAD_ENABLED=true`.
 
 ## Requirements
 
@@ -104,6 +106,9 @@ FILESPACE_PASSWORD=replace-with-a-long-password
 FILESPACE_AUTH_MODE=qr
 FILESPACE_ALLOWED_IPS=192.168.1.0/24
 FILESPACE_PUBLIC=false
+CANDIDATE_FILE_UPLOAD_ENABLED=false
+FILESPACE_UPLOAD_MAX_MB=10
+FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
 ```
 
 `FILESPACE_ROOT` must point to an existing readable folder or drive. A smaller
@@ -229,6 +234,29 @@ FILESPACE_PUBLIC=false
 | `FILESPACE_AUTH_MODE` | `qr`, `password`, or `both`; defaults to QR login |
 | `FILESPACE_ALLOWED_IPS` | Allowed IPv4 addresses and CIDR ranges |
 | `FILESPACE_PUBLIC` | `false` enforces the allowlist; `true` allows the login page from any reachable device |
+| `CANDIDATE_FILE_UPLOAD_ENABLED` | `false` by default. Set to `true` to let authenticated users create folders and upload permitted files |
+| `FILESPACE_UPLOAD_MAX_MB` | Per-file upload limit in MB; defaults to `10` and is capped at `100` |
+| `FILESPACE_UPLOAD_ALLOWED_EXTENSIONS` | Comma-separated upload allowlist. Unsupported or executable-style extensions are ignored |
+
+### Candidate folder creation and uploads
+
+Candidate write access is controlled by one Boolean setting:
+
+```ini
+CANDIDATE_FILE_UPLOAD_ENABLED=false
+```
+
+When this value is missing, invalid, or `false`, the upload and new-folder UI is
+hidden and the backend rejects `/api/upload` and `/api/folder` requests with a
+forbidden response. When set to `true`, authenticated users can create folders
+inside the shared root and upload allowed files into the current folder.
+
+Uploads are stored with safe, unique server-generated filenames, so uploaded
+filenames are never trusted for storage. The server validates extension,
+declared MIME type, file signature or text shape, request size, per-file size,
+and a simple per-IP upload quota before saving. The built-in server does not
+include malware scanning; keep uploads on trusted networks and rely on your OS
+or security tooling to scan the shared folder when needed.
 
 ## QR login
 
@@ -266,7 +294,10 @@ user. Use a smaller `--root` when whole-drive access is not necessary.
 - Do not expose the built-in HTTP server directly to the public internet.
 - Plain HTTP does not encrypt passwords or files in transit.
 - The application folder, `.env`, and logs are excluded from sharing.
-- The server is read-only; it cannot modify the shared drive.
+- The server is read-only unless `CANDIDATE_FILE_UPLOAD_ENABLED=true`.
+- If candidate writes are enabled, authenticated users can create folders and
+  upload files under the shared root, subject to the configured allowlist and
+  size limit.
 - Do not commit `.env`, `logs.txt`, or personal files.
 
 For internet access, use a properly configured VPN or an HTTPS reverse proxy
