@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+   <meta charset="utf-8">
+   <meta name="viewport" content="width=device-width,initial-scale=1">
+   <meta name="color-scheme" content="dark">
+   <title>FileSpace · Sign in</title>
+   <style>
+      :root {
+         --bg: #0a1020;
+         --line: #26334b;
+         --text: #edf2ff;
+         --muted: #9ba9c2;
+         --accent: #9ba9ff
+      }
+
+      * {
+         box-sizing: border-box
+      }
+
+      body {
+         margin: 0;
+         min-height: 100vh;
+         display: grid;
+         place-items: center;
+         padding: 20px;
+         background: radial-gradient(ellipse at 10% 0%, #202b55 0, transparent 35%), radial-gradient(ellipse at 95% 10%, #10334b 0, transparent 28%), var(--bg);
+         color: var(--text);
+         font: 14px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif
+      }
+
+      .card {
+         width: min(420px, 100%);
+         border: 1px solid var(--line);
+         border-radius: 22px;
+         background: rgba(17, 26, 45, .94);
+         padding: 30px;
+         box-shadow: 0 22px 65px #0004
+      }
+
+      .brand {
+         display: flex;
+         align-items: center;
+         gap: 11px;
+         font-size: 19px;
+         font-weight: 800;
+         letter-spacing: -.04em;
+         margin-bottom: 22px
+      }
+
+      .logo {
+         width: 42px;
+         height: 42px;
+         border-radius: 14px;
+         display: grid;
+         place-items: center;
+         background: linear-gradient(135deg, #a5b4fc, #67e8f9);
+         color: #0a1020;
+         font-size: 22px
+      }
+
+      h1 {
+         font-size: 26px;
+         letter-spacing: -.04em;
+         margin: 0 0 6px
+      }
+
+      p {
+         color: var(--muted);
+         margin: 0 0 18px
+      }
+
+      .qr {
+         border: 1px solid #2b3852;
+         background: #0c1527;
+         border-radius: 14px;
+         padding: 14px;
+         margin: 14px 0 18px;
+         color: var(--muted);
+         font-size: 13px
+      }
+
+      label {
+         display: block;
+         font-size: 11px;
+         color: var(--muted);
+         margin: 14px 0 6px;
+         font-weight: 600
+      }
+
+      input {
+         width: 100%;
+         border: 1px solid #2b3852;
+         background: #0c1527;
+         border-radius: 12px;
+         padding: 12px;
+         color: var(--text);
+         outline: none;
+         font: inherit
+      }
+
+      input:focus {
+         border-color: var(--accent);
+         box-shadow: 0 0 0 3px #9ba9ff20
+      }
+
+      button {
+         width: 100%;
+         margin-top: 22px;
+         border: 0;
+         border-radius: 12px;
+         padding: 12px;
+         font: inherit;
+         font-weight: 700;
+         color: #0a1020;
+         background: linear-gradient(135deg, #a5b4fc, #67e8f9);
+         cursor: pointer
+      }
+
+      button:disabled {
+         opacity: .6;
+         cursor: wait
+      }
+
+      button.secondary {
+         margin-top: 10px;
+         color: var(--text);
+         background: #111b31;
+         border: 1px solid #2b3852
+      }
+
+      .scan {
+         display: grid;
+         gap: 10px;
+         margin-top: 14px
+      }
+
+      .scan video {
+         width: 100%;
+         aspect-ratio: 4/3;
+         border: 1px solid #2b3852;
+         border-radius: 14px;
+         background: #050914;
+         object-fit: cover
+      }
+
+      .err {
+         min-height: 20px;
+         margin-top: 14px;
+         color: #fca5a5;
+         font-size: 12px
+      }
+
+      .note {
+         color: #fde68a;
+         font-size: 12px
+      }
+   </style>
+</head>
+
+<body>
+   <main class="card">
+      <div class="brand"><span class="logo">▱</span>FileSpace</div>
+      <h1>Sign in</h1>
+      <p id="lead"></p>
+      <div class="qr" id="qr" hidden>Scan the one-time QR code printed in the FileSpace terminal. If it expired, restart
+         FileSpace to print a fresh code.</div>
+      <div class="scan" id="scan" hidden>
+         <button id="scanBtn" type="button">Open camera</button>
+         <video id="scanVideo" muted playsinline hidden></video>
+         <button class="secondary" id="scanStop" type="button" hidden>Close camera</button>
+      </div>
+      <form id="f" autocomplete="on" hidden>
+         <label for="email">Email</label><input id="email" name="email" type="email" autocomplete="username">
+         <label for="password">Password</label><input id="password" name="password" type="password"
+            autocomplete="current-password">
+         <button id="btn" type="submit">Sign in</button>
+      </form>
+      <div class="err" id="err" role="alert"></div>
+      <div class="note" id="note"></div>
+   </main>
+   <script>
+      const AUTH =/*__AUTH__*/;
+      const f = document.getElementById('f'), err = document.getElementById('err'), btn = document.getElementById('btn'), lead = document.getElementById('lead');
+      const scan = document.getElementById('scan'), scanBtn = document.getElementById('scanBtn'), scanStop = document.getElementById('scanStop'), scanVideo = document.getElementById('scanVideo');
+      document.getElementById('qr').hidden = !AUTH.qr;
+      scan.hidden = !AUTH.qr;
+      f.hidden = !AUTH.password;
+      lead.textContent = AUTH.qr && AUTH.password ? 'Scan the terminal QR code or use your password fallback.' : AUTH.qr ? 'Use the one-time QR code shown in the terminal.' : 'Enter your credentials to browse files.';
+      if (AUTH.password) { f.email.required = true; f.password.required = true; f.email.autofocus = true }
+      try { if (sessionStorage.getItem('fs_out')) { sessionStorage.removeItem('fs_out'); document.getElementById('note').textContent = 'You were signed out. This happens automatically after ' + AUTH.idle_minutes + ' minutes of inactivity.' } } catch { }
+      let scanStream = null, scanTimer = null, scanDetector = null, scanBusy = false;
+      function tokenFromQrValue(value) { try { const u = new URL(value, location.origin); if (u.pathname !== '/auth/qr') return ''; const raw = u.hash.replace(/^#/, ''); const q = raw[0] === '?' ? raw.slice(1) : raw; const p = new URLSearchParams(q); return p.get('t') || p.get('token') || (!q.includes('=') ? q : '') } catch { return '' } }
+      function stopScanner() { if (scanTimer) { clearTimeout(scanTimer); scanTimer = null } if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null } scanVideo.srcObject = null; scanVideo.hidden = true; scanStop.hidden = true; scanBtn.disabled = false; scanBtn.textContent = 'Open camera'; scanBusy = false }
+      async function consumeQr(token) {
+         if (!token) { err.textContent = 'That QR code is not a FileSpace login code.'; return } stopScanner(); err.textContent = ''; scanBtn.disabled = true; scanBtn.textContent = 'Signing in...';
+         try {
+            const r = await fetch('/auth/qr/consume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token }) });
+            const d = await r.json().catch(() => ({})); if (r.ok) { location.reload(); return } err.textContent = d.error || ('QR sign-in failed (' + r.status + ')')
+         }
+         catch { err.textContent = 'Could not reach the server.' } scanBtn.disabled = false; scanBtn.textContent = 'Open camera'
+      }
+      async function scanLoop() { if (!scanStream || scanBusy) return; try { const found = await scanDetector.detect(scanVideo); const hit = found.find(x => x.rawValue); if (hit) { scanBusy = true; const token = tokenFromQrValue(hit.rawValue); if (token) return consumeQr(token); err.textContent = 'That QR code is not a FileSpace login code.'; scanBusy = false } } catch { } scanTimer = setTimeout(scanLoop, 350) }
+      async function startScanner() {
+         err.textContent = ''; if (!('BarcodeDetector' in window)) { err.textContent = 'This browser cannot scan QR codes here. Use your phone camera or the one-time link printed in the terminal.'; return }
+         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { err.textContent = 'Camera access needs HTTPS, localhost, or a browser that allows camera on this address.'; return }
+         try { scanDetector = new BarcodeDetector({ formats: ['qr_code'] }); scanStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false }); scanVideo.srcObject = scanStream; scanVideo.hidden = false; scanStop.hidden = false; scanBtn.disabled = true; await scanVideo.play(); scanLoop() }
+         catch (e) { stopScanner(); err.textContent = (e && e.name === 'NotAllowedError') ? 'Camera permission was denied.' : 'Could not open the camera. On local-network HTTP, your browser may block camera access.' }
+      }
+      if (AUTH.qr) { scanBtn.addEventListener('click', startScanner); scanStop.addEventListener('click', stopScanner); addEventListener('pagehide', stopScanner) }
+      if (AUTH.password) f.addEventListener('submit', async e => {
+         e.preventDefault(); err.textContent = ''; btn.disabled = true;
+         try {
+            const r = await fetch('/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email: f.email.value, password: f.password.value }) });
+            const d = await r.json().catch(() => ({})); if (r.ok) { location.reload(); return } err.textContent = d.error || ('Sign-in failed (' + r.status + ')')
+         }
+         catch { err.textContent = 'Could not reach the server.' } btn.disabled = false
+      });
+   </script>
+</body>
+
+</html>

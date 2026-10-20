@@ -1,0 +1,2 @@
+"""Bundled FileSpace HTML templates."""
+

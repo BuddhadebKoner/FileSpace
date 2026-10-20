@@ -2,8 +2,8 @@
 
 FileSpace is a personal web file browser for Windows. It is read-only by
 default, with an optional authenticated upload mode. Clone the repository,
-configure one `.env` file, and run one Python command to browse a folder or an
-entire drive from a browser.
+answer the terminal setup questions, and run one Python command to browse a
+folder or an entire drive from a browser.
 
 Repository: <https://github.com/BuddhadebKoner/FileSpace>
 
@@ -19,7 +19,7 @@ Repository: <https://github.com/BuddhadebKoner/FileSpace>
   allowlisting, throttling, session expiry, security headers, and activity logs.
 - Keep the shared filesystem read-only by default.
 - Optionally allow authenticated users to create folders and upload permitted
-  file types when `CANDIDATE_FILE_UPLOAD_ENABLED=true`.
+  file types when uploads are enabled during setup.
 
 ## Requirements
 
@@ -48,25 +48,30 @@ only improves image thumbnail generation.
 ```powershell
 git clone https://github.com/BuddhadebKoner/FileSpace.git
 cd .\FileSpace
-Copy-Item .env.example .env
-notepad .env
 python .\fileserver.py
 ```
 
-Example `.env` values:
+When `python .\fileserver.py` is started in an interactive terminal, FileSpace
+asks setup questions first and saves the answers before generating the startup
+QR code. Use `--no-setup` only for scripted runs that should reuse existing
+saved settings.
 
-```ini
-FILESPACE_ROOT=D:\Shared
-FILESPACE_CREATE_SHORTCUT=true
-FILESPACE_AUTH_MODE=qr
-FILESPACE_ALLOWED_IPS=192.168.1.0/24
-FILESPACE_PUBLIC=true
-CANDIDATE_FILE_UPLOAD_ENABLED=true
-FILESPACE_UPLOAD_MAX_MB=100
-FILESPACE_UPLOAD_ALLOWED_EXTENSIONS=pdf,png,jpg,jpeg,gif,webp,bmp,mp4,m4v,mov,webm,mkv,ogv,txt,md,csv,json,docx,xlsx,pptx,rtf,odt,ods,odp
-```
+Example answers:
 
-`FILESPACE_ROOT` must point to an existing readable folder or drive. A smaller
+| Question | Example answer | What it does |
+| --- | --- | --- |
+| `FILESPACE_ROOT` | `D:\Shared` | Shares this folder or drive |
+| `FILESPACE_CREATE_SHORTCUT` | `Y` | Creates/updates `File Server.lnk` on the Desktop |
+| `Use QR login?` | `Y` | Prints a one-time QR login code in the terminal |
+| `FILESPACE_PUBLIC` | `N` | Restricts login page access to this PC and allowed IPs |
+| `FILESPACE_ALLOWED_IPS` | `192.168.1.0/24` | Allows devices on that network |
+| `CANDIDATE_FILE_UPLOAD_ENABLED` | `Y` | Enables folder creation and uploads |
+| `Use default FILESPACE_UPLOAD_MAX_MB=1000?` | `Y` | Allows uploads up to 1000 MB each |
+
+If you answer `N` to `Use QR login?`, FileSpace asks for `FILESPACE_EMAIL` and
+`FILESPACE_PASSWORD` and uses those credentials instead of a terminal QR code.
+
+The shared root must point to an existing readable folder or drive. A smaller
 folder such as `D:\Shared` is usually more efficient and safer than sharing
 the entire drive. The shortcut is created on the Windows Desktop selected by
 Windows, including a OneDrive-managed Desktop.
@@ -78,12 +83,8 @@ FileSpace.
 
 ### Same Wi-Fi or local network
 
-Allow your home or office subnet only:
-
-```ini
-FILESPACE_ALLOWED_IPS=192.168.1.0/24
-FILESPACE_PUBLIC=false
-```
+Allow your home or office subnet only by answering `N` to `FILESPACE_PUBLIC`,
+then entering your subnet at `FILESPACE_ALLOWED_IPS`.
 
 Use the actual subnet shown by your router. Common examples are
 `192.168.0.0/24`, `192.168.1.0/24`, `10.0.0.0/24`, or a private Tailscale
@@ -91,12 +92,8 @@ range.
 
 ### Public login page
 
-Any reachable device can open the login page:
-
-```ini
-FILESPACE_ALLOWED_IPS=
-FILESPACE_PUBLIC=true
-```
+Any reachable device can open the login page when you answer `Y` to
+`FILESPACE_PUBLIC`.
 
 This is useful only when a VPN, firewall, router rule, or HTTPS reverse proxy
 already protects the server. Public mode does not make plain HTTP safe for
@@ -104,38 +101,22 @@ direct internet exposure.
 
 ### IP-restricted access
 
-Allow only selected devices or networks:
-
-```ini
-FILESPACE_ALLOWED_IPS=192.168.1.25,192.168.1.40
-FILESPACE_PUBLIC=false
-```
+Allow only selected devices or networks by answering `N` to `FILESPACE_PUBLIC`
+and then entering those values at `FILESPACE_ALLOWED_IPS`.
 
 Individual IPv4 addresses and CIDR ranges can be separated by commas, spaces,
-or semicolons:
-
-```ini
-FILESPACE_ALLOWED_IPS=192.168.1.25, 192.168.1.0/24, 100.101.102.103
-FILESPACE_PUBLIC=false
-```
+or semicolons, for example `192.168.1.25, 192.168.1.0/24,
+100.101.102.103`.
 
 Devices outside the allowlist are rejected before the login page. The local
 computer running FileSpace is always allowed.
 
-Settings are reloaded automatically after `.env` is saved. The startup output
-and **Server health** panel show the active access mode.
+The startup output and **Server health** panel show the active access mode.
 
 ## Select the shared root
 
-Share the whole `D:\` drive:
-
-In `.env`:
-
-```ini
-FILESPACE_ROOT=D:\
-```
-
-Or for one run:
+Share the whole `D:\` drive by answering `D:\` at `FILESPACE_ROOT`, or pass it
+for one run:
 
 ```powershell
 python .\fileserver.py --root D:\
@@ -157,54 +138,39 @@ Available options:
 
 | Option | Default | Purpose |
 | --- | --- | --- |
-| `--root` | `FILESPACE_ROOT` from `.env`, or `D:\` | Folder or drive to share for one run |
+| `--root` | saved root, or `D:\` | Folder or drive to share for one run |
 | `--host` | `0.0.0.0` | Address to listen on |
 | `--port` | `6789` | HTTP port |
-| `--env` | `.env` beside the script | Settings file |
+| `--env` | saved file beside the script | Path to saved setup answers |
 | `--log` | `logs.txt` beside the script | Activity log |
+| `--no-setup` | off | Skip interactive setup prompts |
 
 Run `python .\fileserver.py --help` for the complete command reference.
 
-## Configuration
+## Setup Questions
 
-`.env` is ignored by Git and must never be committed. Start from
-[.env.example](./.env.example):
+The setup questions are the normal way to configure FileSpace. Run the server,
+answer the prompts, and FileSpace saves the answers for later runs.
 
-```ini
-FILESPACE_ROOT=D:\
-FILESPACE_CREATE_SHORTCUT=false
-FILESPACE_EMAIL=me@example.com
-FILESPACE_PASSWORD=use-a-long-unique-password
-FILESPACE_AUTH_MODE=qr
-FILESPACE_ALLOWED_IPS=192.168.1.0/24
-FILESPACE_PUBLIC=false
-```
-
-| Setting | Description |
+| Question | Answer format |
 | --- | --- |
-| `FILESPACE_ROOT` | Folder or drive to share; defaults to `D:\` |
-| `FILESPACE_CREATE_SHORTCUT` | `true` creates or updates `File Server.lnk` on the Desktop; `false` disables shortcut creation |
-| `FILESPACE_EMAIL` | Login email for `password` or `both` auth modes |
-| `FILESPACE_PASSWORD` | Login password for `password` or `both` auth modes; use at least 8 characters |
-| `FILESPACE_AUTH_MODE` | `qr`, `password`, or `both`; defaults to QR login |
-| `FILESPACE_ALLOWED_IPS` | Allowed IPv4 addresses and CIDR ranges |
-| `FILESPACE_PUBLIC` | `false` enforces the allowlist; `true` allows the login page from any reachable device |
-| `CANDIDATE_FILE_UPLOAD_ENABLED` | `false` by default. Set to `true` to let authenticated users create folders and upload permitted files |
-| `FILESPACE_UPLOAD_MAX_MB` | Per-file upload limit in MB; defaults to `10` and is capped at `100` |
-| `FILESPACE_UPLOAD_ALLOWED_EXTENSIONS` | Comma-separated upload allowlist. Unsupported or executable-style extensions are ignored |
+| `FILESPACE_ROOT` | Existing folder or drive, such as `D:\Shared` |
+| `FILESPACE_CREATE_SHORTCUT` | `Y` or `N` |
+| `Use QR login?` | `Y` for QR, `N` for email/password |
+| `FILESPACE_EMAIL` | Asked only when QR login is disabled |
+| `FILESPACE_PASSWORD` | Asked only when QR login is disabled |
+| `FILESPACE_PUBLIC` | `Y` to allow any reachable device to open login, `N` to use an allowlist |
+| `FILESPACE_ALLOWED_IPS` | Asked only when public mode is disabled |
+| `CANDIDATE_FILE_UPLOAD_ENABLED` | `Y` or `N` |
+| `Use default FILESPACE_UPLOAD_MAX_MB=1000?` | `Y` for 1000 MB, `N` to enter a custom limit |
 
 ### Candidate folder creation and uploads
 
-Candidate write access is controlled by one Boolean setting:
-
-```ini
-CANDIDATE_FILE_UPLOAD_ENABLED=false
-```
-
-When this value is missing, invalid, or `false`, the upload and new-folder UI is
-hidden and the backend rejects `/api/upload` and `/api/folder` requests with a
-forbidden response. When set to `true`, authenticated users can create folders
-inside the shared root and upload allowed files into the current folder.
+Candidate write access is controlled by the `CANDIDATE_FILE_UPLOAD_ENABLED`
+setup question. When disabled, the upload and new-folder UI is hidden and the
+backend rejects `/api/upload` and `/api/folder` requests with a forbidden
+response. When enabled, authenticated users can create folders inside the
+shared root and upload allowed files into the current folder.
 
 Uploads are stored with safe, unique server-generated filenames, so uploaded
 filenames are never trusted for storage. The server validates extension,
@@ -228,9 +194,7 @@ and camera permissions. Some browsers block camera access on plain local-network
 HTTP addresses; use localhost, HTTPS, or scan with the phone/device camera if
 that happens.
 
-Use `FILESPACE_AUTH_MODE=both` if you want QR login with the old
-email/password form as a fallback. Use `FILESPACE_AUTH_MODE=password` to roll
-back to the previous behavior.
+Answer `N` to `Use QR login?` if you want to use email/password login instead.
 
 Only one FileSpace server can use the same port at a time. If you start it
 again while another terminal is already serving that port, the new run exits
@@ -241,19 +205,20 @@ with a clear message instead of taking over the old terminal.
 Sharing `D:\` exposes every readable file under that drive to an authenticated
 user. Use a smaller `--root` when whole-drive access is not necessary.
 
-- Prefer `FILESPACE_PUBLIC=false`.
+- Prefer restricted access unless you are behind a VPN, firewall, or reverse
+  proxy you trust.
 - Use a strong, unique password if password login is enabled.
 - QR login is authentication, not encryption; plain HTTP still exposes traffic
   to devices that can observe the network.
 - Prefer a private LAN or VPN.
 - Do not expose the built-in HTTP server directly to the public internet.
 - Plain HTTP does not encrypt passwords or files in transit.
-- The application folder, `.env`, and logs are excluded from sharing.
-- The server is read-only unless `CANDIDATE_FILE_UPLOAD_ENABLED=true`.
+- The application folder, saved setup answers, and logs are excluded from sharing.
+- The server is read-only unless uploads are enabled during setup.
 - If candidate writes are enabled, authenticated users can create folders and
   upload files under the shared root, subject to the configured allowlist and
   size limit.
-- Do not commit `.env`, `logs.txt`, or personal files.
+- Do not commit saved setup answers, `logs.txt`, or personal files.
 
 For internet access, use a properly configured VPN or an HTTPS reverse proxy
 with additional authentication and access controls.
@@ -268,7 +233,7 @@ Check the environment:
 
 ```powershell
 python --version
-Test-Path .\.env
+python .\fileserver.py --help
 ```
 
 If a device cannot connect, check the selected access mode, the IP/CIDR value,
@@ -278,8 +243,14 @@ Windows Firewall, and whether both devices are on the same network or VPN.
 
 ```text
 FileSpace/
-|-- fileserver.py       # Complete server and web UI
-|-- .env.example        # Safe settings template
+|-- fileserver.py       # Backward-compatible launcher
+|-- filespace/          # Server package
+|   |-- app.py          # CLI startup and server wiring
+|   |-- routes.py       # HTTP routes and request handler
+|   |-- settings.py     # Saved setup parsing and live config reloads
+|   |-- constants.py    # Shared limits, defaults, and security headers
+|   |-- uploads.py      # Upload validation and rate limiting
+|   |-- ui/             # HTML templates for app, login, and QR auth
 |-- .gitignore          # Excludes secrets, logs, and local artifacts
 |-- README.md           # This guide
 ```
